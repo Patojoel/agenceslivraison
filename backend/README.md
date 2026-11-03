@@ -16,6 +16,7 @@ Pour développer : `npm ci`, `npm run lint`, `npm run typecheck`, `npm run build
 À compléter : validation de la configuration de production et durcissement sécurité. Les migrations Drizzle sont appliquées dans l’ordre et leur historique est vérifié ; ne jamais modifier une migration déjà appliquée. Définir les schémas dans `src/schema` puis générer les migrations avec `npm run db:generate`.
 
 Le [guide d'exploitation](docs/operations/exploitation.md) décrit le modèle de production, les secrets et les sauvegardes.
+
 L'architecture du code (modules, agrégats, règles) est décrite dans [domaines](docs/domains.md), les événements de domaine et l'audit dans [événements](docs/events.md).
 
 La [documentation des routes pour les clients](docs/README.md) regroupe les contrats disponibles et les domaines prévus.
