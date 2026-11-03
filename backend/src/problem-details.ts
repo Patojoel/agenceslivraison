@@ -18,7 +18,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const res = ctx.getResponse<Response>();
     const status = exception instanceof HttpException ? exception.getStatus() : 500;
     const title = status === 503 ? 'Service Unavailable' : status === 404 ? 'Not Found' : status >= 500 ? 'Internal Server Error' : 'Request Error';
-    const detail = status === 503 ? 'Database not ready' : status === 404 ? 'Resource not found' : status >= 500 ? 'An unexpected error occurred' : 'The request could not be processed';
+    const detail = status === 503 ? (req.path === '/api/v1/health/ready' ? 'Database not ready' : 'Service unavailable') : status === 404 ? 'Resource not found' : status >= 500 ? 'An unexpected error occurred' : 'The request could not be processed';
     sendProblem(res, req, status, title, detail);
   }
 }

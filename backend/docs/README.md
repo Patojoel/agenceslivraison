@@ -5,7 +5,7 @@ Cette documentation aide à développer les interfaces `front-office`, `admin-ba
 | Groupe | Statut | Documentation |
 | --- | --- | --- |
 | Santé et disponibilité | Implémenté | [Santé](routes/sante.md) |
-| Identité et accès | Prévu, aucun endpoint disponible | [Identité et accès](routes/identite-acces.md) |
+| Identité et accès | Inscription, sessions et accès agence disponibles ; onboarding prévu | [Identité et accès](routes/identite-acces.md) |
 | Agences et marketplace | Prévu | [Groupes métier prévus](routes/groupes-prevus.md) |
 | Commandes, livraison et suivi | Prévu | [Groupes métier prévus](routes/groupes-prevus.md) |
 | Stockage, transferts et retours | Prévu | [Groupes métier prévus](routes/groupes-prevus.md) |

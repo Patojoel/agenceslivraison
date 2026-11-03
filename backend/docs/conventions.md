@@ -4,7 +4,7 @@
 
 - Préfixe commun : `/api/v1`. Les exemples utilisent des chemins relatifs à l'origine configurée de l'API ; ne pas coder une adresse de serveur en dur dans le frontend.
 - Les réponses des endpoints de santé sont en JSON. Le démarrage local est décrit dans le [README backend](../README.md).
-- Aucune authentification ni autorisation métier n'est encore implémentée. Ne pas construire de parcours connecté sur les routes envisagées et ne pas interpréter la présence d'une interface comme une permission serveur.
+- L'inscription et la connexion sont disponibles mais les autorisations métier ne sont pas encore implémentées. Ne pas construire de parcours connecté sur les routes envisagées et ne pas interpréter la présence d'une interface comme une permission serveur.
 - Tant que PostgreSQL ou les migrations ne sont pas prêts, toutes les routes sauf les sondes de santé répondent 503.
 - Les erreurs HTTP utilisent `application/problem+json` avec `type`, `title`, `status`, `detail`, `instance`, `code` et `traceId`. Les erreurs de champs ne sont pas encore implémentées.
 

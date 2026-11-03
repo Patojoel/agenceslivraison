@@ -10,7 +10,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
   app.useGlobalFilters(new ProblemDetailsFilter());
   app.use(readinessMiddleware(app.get(HealthController)));
-  const document = SwaggerModule.createDocument(app, new DocumentBuilder().setTitle('Agences Livraison API').setVersion('1').build());
+  const document = SwaggerModule.createDocument(app, new DocumentBuilder().setTitle('Agences Livraison API').setVersion('1').addBearerAuth().build());
   SwaggerModule.setup('api/v1/docs', app, document);
   app.enableShutdownHooks();
   await app.listen(Number(process.env.PORT ?? 3000), '0.0.0.0');

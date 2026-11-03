@@ -23,8 +23,10 @@ services:
     image: ${API_IMAGE:?set a versioned API_IMAGE}
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
     secrets:
       - database_url
+      - jwt_secret
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,3 +42,5 @@ secrets:
     file: ${POSTGRES_PASSWORD_FILE:?set POSTGRES_PASSWORD_FILE}
   database_url:
     file: ${DATABASE_URL_FILE:?set DATABASE_URL_FILE}
+  jwt_secret:
+    file: ${JWT_SECRET_FILE:?set JWT_SECRET_FILE}
