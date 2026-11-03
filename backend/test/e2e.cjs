@@ -47,54 +47,33 @@ const { Client } = require('pg');
       assert.equal((await ready()).status, 200, 'readiness restored');
     } finally { await driftClient.end(); }
     const { Pool } = require('pg');
-    const { SessionRepository } = require('../dist/modules/identity/infrastructure/session-repository');
+    const jwt = require('jsonwebtoken');
+    const api = 'http://127.0.0.1:3107/api/v1';
+    const accessFor = (userId, sessionId) => jwt.sign({ sid: sessionId }, env.JWT_SECRET, { algorithm: 'HS256', subject: userId, expiresIn: 900, issuer: 'agenceslivraison', audience: 'agenceslivraison-api' });
     const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
     try {
       const userId = '00000000-0000-4000-8000-000000000001';
-      const sessionId = '00000000-0000-4000-8000-000000000002';
-      const now = Date.now();
-      const original = { id: sessionId, userId, tokenDigest: 'a'.repeat(64), expiresAt: now + 60000, revokedAt: null, version: 1 };
-      await pool.query('INSERT INTO users (id) VALUES ($1)', [userId]);
-      await pool.query('INSERT INTO sessions (id, user_id, token_digest, expires_at) VALUES ($1, $2, $3, $4)', [sessionId, userId, original.tokenDigest, new Date(original.expiresAt)]);
-      const { SessionService } = require('../dist/modules/identity/infrastructure/session-service');
-      const service = new SessionService(pool, 60000);
-      const issued = await service.issue(userId, now);
-      const issuedId = issued.refreshToken.split('.')[0];
-      const record = await pool.query('SELECT token_digest FROM sessions WHERE id = $1', [issuedId]);
-      assert.ok(!issued.refreshToken.includes(record.rows[0].token_digest), 'raw token is not stored');
-      const refreshed = await service.refresh(issued.refreshToken, now + 1);
-      assert.ok(refreshed);
-      assert.equal(await service.refresh(issued.refreshToken, now + 2), null, 'old refresh token cannot be reused');
-      assert.equal(await service.logout(issued.refreshToken, now + 3), false, 'old refresh token cannot log out new session');
-      assert.equal(await service.logout(refreshed.refreshToken, now + 4), true);
-      assert.equal(await service.refresh(refreshed.refreshToken, now + 5), null, 'logged out session cannot refresh');
-      assert.equal(await service.refresh('invalid', now), null);
-      const repo = new SessionRepository(pool);
-      const outcomes = await Promise.all([
-        repo.rotate(original, original.tokenDigest, 'b'.repeat(64), now, now + 120000),
-        repo.rotate(original, original.tokenDigest, 'c'.repeat(64), now, now + 120000),
-      ]);
-      assert.equal(outcomes.filter(Boolean).length, 1, 'exactly one concurrent rotation succeeds');
-      assert.equal(await repo.revoke(sessionId, '00000000-0000-4000-8000-000000000003', now), false, 'another user cannot revoke');
-      assert.equal(await repo.revoke(sessionId, userId, now), true);
-      assert.equal(await repo.rotate(original, original.tokenDigest, 'd'.repeat(64), now, now + 120000), false, 'revoked session cannot rotate');
-      const { MembershipRepository, MembershipNotFound, MembershipForbidden } = require('../dist/modules/identity/infrastructure/membership-repository');
+      const userSession = '00000000-0000-4000-8000-000000000002';
+      const secondUser = '00000000-0000-4000-8000-000000000012';
+      const secondSession = '00000000-0000-4000-8000-000000000015';
       const agencyId = '00000000-0000-4000-8000-000000000010';
       const otherAgency = '00000000-0000-4000-8000-000000000011';
-      const secondUser = '00000000-0000-4000-8000-000000000012';
       const ownerOne = '00000000-0000-4000-8000-000000000013';
       const ownerTwo = '00000000-0000-4000-8000-000000000014';
-      await pool.query('INSERT INTO users (id) VALUES ($1)', [secondUser]);
+      await pool.query('INSERT INTO users (id) VALUES ($1), ($2)', [userId, secondUser]);
+      await pool.query("INSERT INTO sessions (id, user_id, token_digest, expires_at) VALUES ($1, $2, $3, now() + interval '1 hour'), ($4, $5, $6, now() + interval '1 hour')", [userSession, userId, 'a'.repeat(64), secondSession, secondUser, 'b'.repeat(64)]);
       await pool.query('INSERT INTO agencies (id) VALUES ($1), ($2)', [agencyId, otherAgency]);
       await pool.query("INSERT INTO agency_memberships (id, agency_id, user_id, role) VALUES ($1, $3, $4, 'owner'), ($2, $3, $5, 'owner')", [ownerOne, ownerTwo, agencyId, userId, secondUser]);
-      const memberships = new MembershipRepository(pool);
-      await assert.rejects(memberships.change(userId, otherAgency, ownerTwo, 'agent', false), MembershipNotFound);
-      await assert.rejects(memberships.change(userId, agencyId, ownerOne, 'agent', true), MembershipForbidden);
-      const concurrent = await Promise.allSettled([
-        memberships.change(userId, agencyId, ownerTwo, 'owner', false),
-        memberships.change(secondUser, agencyId, ownerOne, 'owner', false),
-      ]);
-      assert.equal(concurrent.filter(outcome => outcome.status === 'fulfilled').length, 1, 'only one owner removal succeeds');
+      const firstAccess = accessFor(userId, userSession);
+      const secondAccess = accessFor(secondUser, secondSession);
+      const removeMember = (agency, member, access) => fetch(`${api}/agencies/${agency}/members/${member}`, { method: 'DELETE', headers: { authorization: `Bearer ${access}` } });
+      assert.equal((await removeMember(otherAgency, ownerTwo, firstAccess)).status, 404, 'membership in another agency is hidden');
+      const selfChange = await fetch(`${api}/agencies/${agencyId}/members/${ownerOne}`, { method: 'PATCH', headers: { authorization: `Bearer ${firstAccess}`, 'content-type': 'application/json' }, body: JSON.stringify({ role: 'agent' }) });
+      assert.equal(selfChange.status, 403, 'own role cannot change');
+      const concurrent = await Promise.all([removeMember(agencyId, ownerTwo, firstAccess), removeMember(agencyId, ownerOne, secondAccess)]);
+      const statuses = concurrent.map(response => response.status).sort();
+      assert.equal(statuses[0], 200, 'one owner removal succeeds');
+      assert.ok([404, 409].includes(statuses[1]), 'the other owner removal is refused');
       const remaining = await pool.query("SELECT count(*)::int AS total FROM agency_memberships WHERE agency_id = $1 AND role = 'owner' AND active", [agencyId]);
       assert.equal(remaining.rows[0].total, 1, 'last owner protected in concurrent updates');
       const audits = await pool.query("SELECT count(*)::int AS total FROM identity_audit WHERE agency_id = $1 AND action = 'membership.removed'", [agencyId]);
@@ -141,6 +120,10 @@ const { Client } = require('pg');
     const ownerMembership = '00000000-0000-4000-8000-000000000022';
     const targetMembership = '00000000-0000-4000-8000-000000000023';
     try {
+      const storedSession = await agencyPool.query("SELECT token_digest, expires_at > now() + interval '29 days' AS long_lived FROM sessions WHERE id = $1", [claims.sid]);
+      assert.notEqual(storedSession.rows[0].token_digest, tokens.refreshToken.split('.')[1], 'raw refresh secret is not stored');
+      assert.match(storedSession.rows[0].token_digest, /^[a-f0-9]{64}$/);
+      assert.equal(storedSession.rows[0].long_lived, true, 'session lasts 30 days');
       await agencyPool.query('INSERT INTO agencies (id) VALUES ($1), ($2)', [httpAgency, foreignAgency]);
       await agencyPool.query("INSERT INTO agency_memberships (id, agency_id, user_id, role) VALUES ($1, $3, $4, 'owner'), ($2, $3, $5, 'agent')", [ownerMembership, targetMembership, httpAgency, account.id, '00000000-0000-4000-8000-000000000012']);
       const changeMember = (agency, member, access, role) => fetch(`http://127.0.0.1:3107/api/v1/agencies/${agency}/members/${member}`, { method: 'PATCH', headers: { authorization: `Bearer ${access}`, 'content-type': 'application/json' }, body: JSON.stringify({ role }) });
@@ -155,12 +138,17 @@ const { Client } = require('pg');
       const issuedInvite = await createInvite(httpAgency, tokens.accessToken, { email: 'invited@example.com', role: 'agent' });
       assert.equal(issuedInvite.status, 201, 'owner can invite agent');
       const invite = await issuedInvite.json();
-      const acceptInvite = (access) => fetch('http://127.0.0.1:3107/api/v1/agency-invitations/accept', { method: 'POST', headers: { authorization: `Bearer ${access}`, 'content-type': 'application/json' }, body: JSON.stringify({ token: invite.token }) });
+      const inviteTtl = Date.parse(invite.expiresAt) - Date.now();
+      assert.ok(inviteTtl > 7 * 86400000 - 60000 && inviteTtl < 7 * 86400000 + 60000, 'invitation lasts seven days');
+      const acceptToken = (access, token) => fetch(`${api}/agency-invitations/accept`, { method: 'POST', headers: { authorization: `Bearer ${access}`, 'content-type': 'application/json' }, body: JSON.stringify({ token }) });
+      const acceptInvite = (access) => acceptToken(access, invite.token);
       assert.equal((await acceptInvite(tokens.accessToken)).status, 404, 'wrong email cannot accept');
       const invitedLogin = await login({ email: 'invited@example.com', password: invitePassword });
       assert.equal(invitedLogin.status, 200);
       const invitedTokens = await invitedLogin.json();
-      assert.equal((await acceptInvite(invitedTokens.accessToken)).status, 200, 'invited user can accept');
+      const accepted = await acceptInvite(invitedTokens.accessToken);
+      assert.equal(accepted.status, 200, 'invited user can accept');
+      assert.deepEqual(await accepted.json(), { agencyId: httpAgency, role: 'agent' });
       assert.equal((await acceptInvite(invitedTokens.accessToken)).status, 404, 'invitation cannot be reused');
       assert.equal((await createInvite(httpAgency, invitedTokens.accessToken, { email: 'other@example.com', role: 'agent' })).status, 403, 'agent cannot invite');
       const newMember = await agencyPool.query('SELECT role FROM agency_memberships WHERE agency_id = $1 AND user_id = $2', [httpAgency, invitedUser]);
@@ -174,9 +162,24 @@ const { Client } = require('pg');
 
       const saved = await agencyPool.query('SELECT role FROM agency_memberships WHERE id = $1', [targetMembership]);
       assert.equal(saved.rows[0].role, 'admin');
+      const adminAccess = accessFor('00000000-0000-4000-8000-000000000012', '00000000-0000-4000-8000-000000000015');
+      assert.equal((await createInvite(httpAgency, adminAccess, { email: 'admin2@example.com', role: 'admin' })).status, 403, 'admin cannot invite admin');
+      assert.equal((await createInvite(httpAgency, adminAccess, { email: 'agent2@example.com', role: 'agent' })).status, 201, 'admin can invite agent');
+      assert.equal((await changeMember(httpAgency, ownerMembership, adminAccess, 'agent')).status, 403, 'admin cannot manage owner');
+      const again = await createInvite(httpAgency, tokens.accessToken, { email: 'invited@example.com', role: 'agent' });
+      assert.equal(again.status, 201);
+      const againToken = (await again.json()).token;
+      assert.equal((await acceptToken(invitedTokens.accessToken, againToken)).status, 409, 'existing member cannot accept again');
+      const pending = await agencyPool.query('SELECT accepted_at FROM agency_invitations WHERE id = $1', [againToken.split('.')[0]]);
+      assert.equal(pending.rows[0].accepted_at, null, 'refused invitation stays pending');
+      assert.equal((await changeMember(httpAgency, targetMembership, tokens.accessToken, 'superuser')).status, 400, 'unknown role rejected');
+      assert.equal((await fetch(`${api}/agencies/${httpAgency}/members/not-a-uuid`, { method: 'DELETE', headers: { authorization: `Bearer ${tokens.accessToken}` } })).status, 400, 'invalid member id rejected');
+      assert.equal((await fetch(`${api}/agencies/${httpAgency}/members/${targetMembership}`, { method: 'DELETE' })).status, 401, 'anonymous removal rejected');
     } finally { await agencyPool.end(); }
     const me = (token) => fetch('http://127.0.0.1:3107/api/v1/me', { headers: { authorization: `Bearer ${token}` } });
-    assert.equal((await me(tokens.accessToken)).status, 200, 'valid access token');
+    const profile = await me(tokens.accessToken);
+    assert.equal(profile.status, 200, 'valid access token');
+    assert.deepEqual(await profile.json(), { id: account.id, email: 'person@example.com', accountType: 'individual' });
     assert.equal((await me('invalid')).status, 401, 'invalid access token');
     const noExpiry = require('jsonwebtoken').sign({ sid: claims.sid }, env.JWT_SECRET, { algorithm: 'HS256', subject: account.id, issuer: 'agenceslivraison', audience: 'agenceslivraison-api' });
     assert.equal((await me(noExpiry)).status, 401, 'tokens without expiration are rejected');
@@ -186,14 +189,31 @@ const { Client } = require('pg');
     const simultaneous = await Promise.all([postToken('refresh', tokens.refreshToken), postToken('refresh', tokens.refreshToken)]);
     assert.deepEqual(simultaneous.map(r => r.status).sort(), [200, 401], 'one concurrent refresh succeeds');
     const replacement = await simultaneous.find(r => r.status === 200).json();
+    assert.equal((await postToken('refresh', tokens.refreshToken)).status, 401, 'old refresh token cannot be reused');
     assert.equal((await postToken('logout', tokens.refreshToken)).status, 401, 'stale token cannot revoke');
-    assert.equal((await postToken('logout', replacement.refreshToken)).status, 200);
+    assert.equal((await postToken('refresh', 'not-a-token')).status, 400, 'malformed refresh token rejected');
+    const loggedOut = await postToken('logout', replacement.refreshToken);
+    assert.equal(loggedOut.status, 200);
+    assert.deepEqual(await loggedOut.json(), { success: true });
     assert.equal((await me(replacement.accessToken)).status, 401, 'logout revokes access');
     assert.equal((await postToken('refresh', replacement.refreshToken)).status, 401, 'logout revokes refresh');
     const auditPool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
     try {
       const audit = await auditPool.query("SELECT count(*)::int AS total FROM identity_audit WHERE user_id = $1 AND action = 'session.login'", [account.id]);
       assert.equal(audit.rows[0].total, 1);
+      const actions = await auditPool.query('SELECT action, count(*)::int AS total FROM identity_audit GROUP BY action ORDER BY action');
+      assert.deepEqual(Object.fromEntries(actions.rows.map(row => [row.action, row.total])), {
+        'invitation.accepted': 1, 'invitation.created': 3, 'membership.removed': 1, 'membership.role_changed': 1,
+        'session.login': 2, 'session.logout': 1, 'session.refresh': 1, 'user.registered': 1,
+      }, 'every successful change is audited exactly once');
+      const acceptedAudit = await auditPool.query("SELECT user_id, agency_id, subject_user_id FROM identity_audit WHERE action = 'invitation.accepted'");
+      assert.deepEqual(acceptedAudit.rows[0], { user_id: '00000000-0000-4000-8000-000000000024', agency_id: httpAgency, subject_user_id: '00000000-0000-4000-8000-000000000024' });
+      const roleAudit = await auditPool.query("SELECT user_id, agency_id, subject_user_id FROM identity_audit WHERE action = 'membership.role_changed'");
+      assert.deepEqual(roleAudit.rows[0], { user_id: account.id, agency_id: httpAgency, subject_user_id: '00000000-0000-4000-8000-000000000012' });
+      const createdAudit = await auditPool.query("SELECT agency_id, subject_user_id FROM identity_audit WHERE action = 'invitation.created' LIMIT 1");
+      assert.deepEqual(createdAudit.rows[0], { agency_id: httpAgency, subject_user_id: null });
+      const sessionAudit = await auditPool.query("SELECT agency_id, subject_user_id FROM identity_audit WHERE action = 'session.refresh'");
+      assert.deepEqual(sessionAudit.rows[0], { agency_id: null, subject_user_id: null });
     } finally { await auditPool.end(); }
     const openapi = await fetch('http://127.0.0.1:3107/api/v1/docs-json');
     assert.equal(openapi.status, 200);
@@ -204,6 +224,23 @@ const { Client } = require('pg');
     assert.ok(spec.paths['/api/v1/auth/refresh']);
     assert.ok(spec.paths['/api/v1/auth/logout']);
     assert.ok(spec.paths['/api/v1/me']);
+    assert.deepEqual(Object.keys(spec.paths).sort(), [
+      '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agency-invitations/accept',
+      '/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/auth/refresh', '/api/v1/auth/register',
+      '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies',
+    ], 'public route set unchanged');
+    const { JWT_SECRET: _unused, ...unsignedEnv } = env;
+    const unsigned = spawn(process.execPath, ['dist/main.js'], { env: { ...unsignedEnv, PORT: '3108' }, stdio: 'ignore' });
+    try {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        try { await fetch('http://127.0.0.1:3108/api/v1/health/live'); break; } catch { await delay(100); }
+      }
+      const unsignedLogin = await fetch('http://127.0.0.1:3108/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'unknown@example.com', password: 'whatever' }) });
+      assert.equal(unsignedLogin.status, 503, 'login unavailable without signing key, before checking credentials');
+      const unsignedRefresh = await fetch('http://127.0.0.1:3108/api/v1/auth/refresh', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refreshToken: replacement.refreshToken }) });
+      assert.equal(unsignedRefresh.status, 503, 'refresh unavailable without signing key');
+      assert.equal((await fetch('http://127.0.0.1:3108/api/v1/me', { headers: { authorization: 'Bearer anything' } })).status, 503, 'authentication unavailable without signing key');
+    } finally { unsigned.kill('SIGTERM'); }
     console.log('E2E: HTTP, PostgreSQL, migrations and OpenAPI passed');
   } finally { app.kill('SIGTERM'); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
