@@ -1,16 +1,19 @@
-import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Header, Headers, HttpCode, Inject, NotFoundException, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Header, HttpCode, Inject, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { z } from 'zod';
 import { DATABASE_POOL } from '../../../../shared/infrastructure/db/create-pool';
-import { authenticateUser } from './session.controller';
+import { AuthenticatedUser } from '../../../identity/application/queries/authenticate/authenticated-user';
+import { AccessTokenGuard } from '../../../identity/infrastructure/security/access-token.guard';
+import { CurrentUser } from '../../../identity/infrastructure/security/current-user.decorator';
 const invitation = z.object({ email: z.string().trim().email().max(254).transform(v => v.toLowerCase()), role: z.enum(['admin', 'agent']) }).strict();
 const accept = z.object({ token: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.[A-Za-z0-9_-]{43}$/) }).strict();
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 @ApiTags('agency-invitations')
 @ApiBearerAuth()
+@UseGuards(AccessTokenGuard)
 @Controller()
 export class InvitationController {
   constructor(@Inject(DATABASE_POOL) private readonly pool: Pool) {}
@@ -20,8 +23,7 @@ export class InvitationController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiBody({ schema: { type: 'object', required: ['email', 'role'], properties: { email: { type: 'string', format: 'email' }, role: { type: 'string', enum: ['admin', 'agent'] } } } })
   @ApiCreatedResponse({ schema: { type: 'object', required: ['token', 'expiresAt'], properties: { token: { type: 'string', description: 'À transmettre confidentiellement une seule fois' }, expiresAt: { type: 'string', format: 'date-time' } } } })
-  async issue(@Headers('authorization') auth: string | undefined, @Param('agencyId') agencyId: string, @Body() body: unknown): Promise<{ token: string; expiresAt: string }> {
-    const user = await authenticateUser(this.pool, auth);
+  async issue(@CurrentUser() user: AuthenticatedUser, @Param('agencyId') agencyId: string, @Body() body: unknown): Promise<{ token: string; expiresAt: string }> {
     const input = invitation.safeParse(body);
     if (!z.string().uuid().safeParse(agencyId).success || !input.success) throw new BadRequestException();
     const client = await this.pool.connect();
@@ -48,8 +50,7 @@ export class InvitationController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiBody({ schema: { type: 'object', required: ['token'], properties: { token: { type: 'string', writeOnly: true } } } })
   @ApiOkResponse({ schema: { type: 'object', required: ['agencyId', 'role'], properties: { agencyId: { type: 'string', format: 'uuid' }, role: { type: 'string', enum: ['admin', 'agent'] } } } })
-  async accept(@Headers('authorization') auth: string | undefined, @Body() body: unknown): Promise<{ agencyId: string; role: string }> {
-    const user = await authenticateUser(this.pool, auth);
+  async accept(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown): Promise<{ agencyId: string; role: string }> {
     const input = accept.safeParse(body);
     if (!input.success) throw new BadRequestException();
     const [id, secret] = input.data.token.split('.');

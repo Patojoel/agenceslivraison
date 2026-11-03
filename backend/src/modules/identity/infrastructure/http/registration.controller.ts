@@ -1,22 +1,22 @@
-import { BadRequestException, Body, Header, ConflictException, Controller, Inject, Post } from '@nestjs/common';
+import { Body, Controller, Header, Post } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { randomUUID } from 'node:crypto';
-import * as argon2 from 'argon2';
-import { Pool } from 'pg';
-import { z } from 'zod';
-import { DATABASE_POOL } from '../../../../shared/infrastructure/db/create-pool';
-
-const inputSchema = z.object({
-  email: z.string().trim().email().max(254).transform(value => value.toLowerCase()),
-  password: z.string().min(12).max(128).refine(value => Buffer.byteLength(value, 'utf8') <= 256),
-  accountType: z.enum(['individual', 'merchant']),
-}).strict();
+import { CommandHandler } from '../../../../shared/application/command-handler';
+import { TransactionalCommandHandlerFactory } from '../../../../shared/infrastructure/db/transactional-command-handler.factory';
+import { parseRequest } from '../../../../shared/infrastructure/http/parse-request';
+import { RegisterUserCommand } from '../../application/command/register-user/register-user.command';
+import { RegisterUserHandler } from '../../application/command/register-user/register-user.handler';
+import { RegisterUserResponse } from '../../application/command/register-user/register-user.response';
+import { registerRequest } from './requests/identity.requests';
 
 @ApiTags('auth')
 @Controller('auth')
 export class RegistrationController {
-  constructor(@Inject(DATABASE_POOL) private readonly pool: Pool) {}
+  private readonly registerUser: CommandHandler<RegisterUserCommand, RegisterUserResponse>;
+
+  constructor(handler: RegisterUserHandler, transactional: TransactionalCommandHandlerFactory) {
+    this.registerUser = transactional.create(handler);
+  }
 
   @Post('register')
   @Header('Cache-Control', 'no-store')
@@ -27,23 +27,7 @@ export class RegistrationController {
     accountType: { type: 'string', enum: ['individual', 'merchant'] },
   } } })
   @ApiCreatedResponse({ schema: { type: 'object', required: ['id', 'accountType'], properties: { id: { type: 'string', format: 'uuid' }, accountType: { type: 'string', enum: ['individual', 'merchant'] } } } })
-  async register(@Body() body: unknown): Promise<{ id: string; accountType: 'individual' | 'merchant' }> {
-    const parsed = inputSchema.safeParse(body);
-    if (!parsed.success) throw new BadRequestException();
-    const { email, password, accountType } = parsed.data;
-    const passwordHash = await argon2.hash(password, { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 });
-    const id = randomUUID();
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('INSERT INTO users (id, email, password_hash, account_type) VALUES ($1, $2, $3, $4)', [id, email, passwordHash, accountType]);
-      await client.query('INSERT INTO identity_audit (id, user_id, action) VALUES ($1, $2, $3)', [randomUUID(), id, 'user.registered']);
-      await client.query('COMMIT');
-      return { id, accountType };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      if (error instanceof Error && 'code' in error && error.code === '23505') throw new ConflictException();
-      throw error;
-    } finally { client.release(); }
+  register(@Body() body: unknown): Promise<RegisterUserResponse> {
+    return this.registerUser.handle(parseRequest(registerRequest, body));
   }
 }

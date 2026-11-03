@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canManageMembership } from '../../src/modules/identity/domain/agency-policy';
+import { canManageMembership } from '../../src/modules/agencies/domain/agency-policy';
 
 test('owner may manage others, but never change their own role', () => {
   assert.equal(canManageMembership('owner', 'agent', 'admin', false), true);

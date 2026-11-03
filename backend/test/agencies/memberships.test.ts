@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { changeMembership, Membership, removeMembership, selectAgency } from '../../src/modules/identity/domain/memberships';
+import { changeMembership, Membership, removeMembership, selectAgency } from '../../src/modules/agencies/domain/memberships';
 
 const owner: Membership = { userId: 'user-a', agencyId: 'agency-a', role: 'owner', permissions: ['manage-members'], active: true };
 const member: Membership = { userId: 'user-b', agencyId: 'agency-a', role: 'member', permissions: [], active: true };
