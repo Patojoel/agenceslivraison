@@ -40,10 +40,10 @@ const { Client } = require('pg');
     const driftClient = new Client({ connectionString: process.env.TEST_DATABASE_URL });
     await driftClient.connect();
     try {
-      const saved = await driftClient.query('SELECT id, hash FROM drizzle.__drizzle_migrations ORDER BY id LIMIT 1');
-      await driftClient.query("UPDATE drizzle.__drizzle_migrations SET hash = 'changed' WHERE id = $1", [saved.rows[0].id]);
+      const saved = await driftClient.query('SELECT id, name FROM typeorm_migrations ORDER BY id LIMIT 1');
+      await driftClient.query("UPDATE typeorm_migrations SET name = 'Changed1793710789928' WHERE id = $1", [saved.rows[0].id]);
       assert.equal((await ready()).status, 503, 'readiness rejects migration drift');
-      await driftClient.query('UPDATE drizzle.__drizzle_migrations SET hash = $1 WHERE id = $2', [saved.rows[0].hash, saved.rows[0].id]);
+      await driftClient.query('UPDATE typeorm_migrations SET name = $1 WHERE id = $2', [saved.rows[0].name, saved.rows[0].id]);
       assert.equal((await ready()).status, 200, 'readiness restored');
     } finally { await driftClient.end(); }
     const { Pool } = require('pg');

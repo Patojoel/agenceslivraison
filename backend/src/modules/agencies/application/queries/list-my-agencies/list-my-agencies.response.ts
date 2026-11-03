@@ -1,10 +1,4 @@
-export interface MyAgencyDto {
-  readonly agencyId: string;
-  readonly role: string;
-}
+import { CursorPage } from '@shared/application/pagination/cursor-page';
+import { MyAgencyReadModel } from '../../read-models/my-agency.read-model';
 
-export interface ListMyAgenciesResponse {
-  readonly items: readonly MyAgencyDto[];
-  readonly nextCursor: string | null;
-  readonly hasMore: boolean;
-}
+export type ListMyAgenciesResponse = CursorPage<MyAgencyReadModel>;

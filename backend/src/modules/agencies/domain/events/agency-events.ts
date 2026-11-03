@@ -1,4 +1,4 @@
-import { DomainEvent } from '../../../../shared/domain/domain-event';
+import { DomainEvent } from '@shared/domain/domain-event';
 
 export type AgencyEvent =
   | { readonly type: 'InvitationIssued'; readonly agencyId: string; readonly actorId: string }

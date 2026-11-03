@@ -1,4 +1,4 @@
-import { DomainException } from '../../../../shared/domain/domain-exception';
+import { DomainException } from '@shared/domain/exceptions/domain.exception';
 
 export class InvalidPassword extends DomainException {
   constructor() { super('invalid', 'Password does not meet the policy'); }

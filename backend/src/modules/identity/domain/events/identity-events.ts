@@ -1,4 +1,4 @@
-import { DomainEvent } from '../../../../shared/domain/domain-event';
+import { DomainEvent } from '@shared/domain/domain-event';
 
 export type IdentityEvent =
   | { readonly type: 'UserRegistered'; readonly userId: string }

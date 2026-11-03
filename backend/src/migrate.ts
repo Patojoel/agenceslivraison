@@ -1,30 +1,31 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate as drizzleMigrate } from 'drizzle-orm/node-postgres/migrator';
-import { createPool } from './shared/infrastructure/db/create-pool';
-import { requiredMigrations } from './shared/infrastructure/db/migrations';
-async function migrate() {
-  const migrations = requiredMigrations();
-  const pool = createPool();
-  const client = await pool.connect();
+import 'reflect-metadata';
+import dataSource from '@config/typeorm-cli.config';
+import { MIGRATIONS_TABLE } from '@config/typeorm.config';
+
+const MIGRATION_LOCK = 19188412;
+
+/** Explicit, repeatable deployment step: concurrent runs are serialized and an unknown history is refused. */
+async function migrate(): Promise<void> {
+  await dataSource.initialize();
+  const runner = dataSource.createQueryRunner();
+  await runner.connect();
   try {
-    await client.query('SELECT pg_advisory_lock($1)', [19188412]);
-    const legacy = await client.query<{ exists: boolean }>("SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists");
-    if (legacy.rows[0]?.exists) {
-      const versions = await client.query<{ version: string }>('SELECT version FROM public.schema_migrations');
-      if (versions.rows.some(row => row.version !== '0001_initial')) throw new Error('Unknown legacy migrations require manual review');
-    }
-    const current = await client.query<{ exists: boolean }>("SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS exists");
-    if (current.rows[0]?.exists) {
-      const applied = await client.query<{ hash: string; created_at: string }>('SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at');
-      if (applied.rows.length > migrations.length || applied.rows.some((row, i) => row.hash !== migrations[i]?.hash || Number(row.created_at) !== migrations[i]?.folderMillis)) {
+    await runner.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK]);
+    const [table]: { exists: boolean }[] = await runner.query(`SELECT to_regclass('public.${MIGRATIONS_TABLE}') IS NOT NULL AS exists`);
+    if (table?.exists) {
+      const files = dataSource.migrations.map(migration => migration.name ?? migration.constructor.name);
+      const applied: { name: string }[] = await runner.query(`SELECT name FROM ${MIGRATIONS_TABLE} ORDER BY id`);
+      if (applied.length > files.length || applied.some((row, index) => row.name !== files[index])) {
         throw new Error('Migration history does not match files');
       }
     }
-    await drizzleMigrate(drizzle(client), { migrationsFolder: './migrations' });
+    await dataSource.runMigrations({ transaction: 'each' });
   } finally {
-    await client.query('SELECT pg_advisory_unlock($1)', [19188412]);
-    client.release();
-    await pool.end();
+    await runner.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK]).catch(() => undefined);
+    await runner.release();
+    await dataSource.destroy();
   }
 }
+
+// The error may contain the connection string: only a generic message is logged.
 void migrate().catch(() => { console.error('Migration failed'); process.exitCode = 1; });

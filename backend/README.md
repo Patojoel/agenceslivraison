@@ -13,7 +13,7 @@ La migration est explicite et répétable. `GET /api/v1/health/live` vérifie le
 
 Pour développer : `npm ci`, `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`. Le test HTTP et PostgreSQL utilise une base dédiée vide : `TEST_DATABASE_URL=postgres://test:test@localhost:5432/delivery_test npm run test:e2e`. Il refuse toute base contenant des tables et applique les migrations ; ne jamais utiliser une base contenant des données. La CI démarre une base isolée pour ce test. Pour arrêter les services sans supprimer la base : `docker compose down`. Le volume PostgreSQL persiste ; prévoir des sauvegardes chiffrées hors machine et tester leur restauration avant toute utilisation réelle.
 
-À compléter : validation de la configuration de production et durcissement sécurité. Les migrations Drizzle sont appliquées dans l’ordre et leur historique est vérifié ; ne jamais modifier une migration déjà appliquée. Définir les schémas dans `src/schema` puis générer les migrations avec `npm run db:generate`.
+À compléter : validation de la configuration de production et durcissement sécurité. Les migrations TypeORM (`src/migrations/`) sont appliquées dans l’ordre et leur historique est vérifié ; ne jamais modifier une migration déjà appliquée. Après modification d'une entité `*.orm-entity.ts`, générer la migration avec `npm run migration:generate -- src/migrations/<nom>` sur une base de développement migrée, la relire, puis contrôler avec `npm run migration:check` qu'il ne reste aucun écart entre entités et schéma.
 
 Le [guide d'exploitation](docs/operations/exploitation.md) décrit le modèle de production, les secrets et les sauvegardes.
 

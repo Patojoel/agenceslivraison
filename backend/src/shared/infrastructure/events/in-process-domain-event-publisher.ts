@@ -1,5 +1,5 @@
 import { DomainEvent } from '../../domain/domain-event';
-import { DomainEventPublisher, DomainEventSubscriber } from '../../application/ports/domain-events';
+import { DomainEventPublisher, DomainEventSubscriber } from '../../application/ports/domain-event-publisher.port';
 
 export class InProcessDomainEventPublisher implements DomainEventPublisher {
   private readonly subscribers: DomainEventSubscriber[] = [];

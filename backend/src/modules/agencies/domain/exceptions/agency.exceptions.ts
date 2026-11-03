@@ -1,4 +1,4 @@
-import { DomainException } from '../../../../shared/domain/domain-exception';
+import { DomainException } from '@shared/domain/exceptions/domain.exception';
 
 /** Also raised when the actor is not a member, so other agencies stay invisible. */
 export class MembershipNotFound extends DomainException {

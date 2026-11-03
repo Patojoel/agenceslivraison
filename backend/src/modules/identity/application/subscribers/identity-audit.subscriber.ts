@@ -1,6 +1,7 @@
-import { AuditLog } from '../../../../shared/application/ports/audit-log';
-import { DomainEventSubscriber } from '../../../../shared/application/ports/domain-events';
-import { DomainEvent } from '../../../../shared/domain/domain-event';
+import { Inject, Injectable } from '@nestjs/common';
+import { AUDIT_LOG, AuditLog } from '@shared/application/ports/audit-log.port';
+import { DomainEventSubscriber } from '@shared/application/ports/domain-event-publisher.port';
+import { DomainEvent } from '@shared/domain/domain-event';
 import { IdentityEvent, isIdentityEvent } from '../../domain/events/identity-events';
 
 const ACTIONS: Record<IdentityEvent['type'], string> = {
@@ -10,8 +11,9 @@ const ACTIONS: Record<IdentityEvent['type'], string> = {
   SessionRevoked: 'session.logout',
 };
 
+@Injectable()
 export class IdentityAuditSubscriber implements DomainEventSubscriber {
-  constructor(private readonly audit: AuditLog) {}
+  constructor(@Inject(AUDIT_LOG) private readonly audit: AuditLog) {}
 
   async handle(event: DomainEvent): Promise<void> {
     if (!isIdentityEvent(event)) return;
