@@ -1,20 +1,30 @@
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate as drizzleMigrate } from 'drizzle-orm/node-postgres/migrator';
 import { createDatabase } from './database';
+import { requiredMigrations } from './migrations';
 async function migrate() {
+  const migrations = requiredMigrations();
   const { pool } = createDatabase();
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock($1)', [19188412]);
-    await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-    const existing = await client.query('SELECT version FROM schema_migrations WHERE version = $1', ['0001_initial']);
-    if (!existing.rowCount) {
-      await client.query(await readFile(join(process.cwd(), 'migrations/0001_initial.sql'), 'utf8'));
-      await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', ['0001_initial']);
+    await client.query('SELECT pg_advisory_lock($1)', [19188412]);
+    const legacy = await client.query<{ exists: boolean }>("SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists");
+    if (legacy.rows[0]?.exists) {
+      const versions = await client.query<{ version: string }>('SELECT version FROM public.schema_migrations');
+      if (versions.rows.some(row => row.version !== '0001_initial')) throw new Error('Unknown legacy migrations require manual review');
     }
-    await client.query('COMMIT');
-  } catch (error) { await client.query('ROLLBACK'); throw error; }
-  finally { client.release(); await pool.end(); }
+    const current = await client.query<{ exists: boolean }>("SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS exists");
+    if (current.rows[0]?.exists) {
+      const applied = await client.query<{ hash: string; created_at: string }>('SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at');
+      if (applied.rows.length > migrations.length || applied.rows.some((row, i) => row.hash !== migrations[i]?.hash || Number(row.created_at) !== migrations[i]?.folderMillis)) {
+        throw new Error('Migration history does not match files');
+      }
+    }
+    await drizzleMigrate(drizzle(client), { migrationsFolder: './migrations' });
+  } finally {
+    await client.query('SELECT pg_advisory_unlock($1)', [19188412]);
+    client.release();
+    await pool.end();
+  }
 }
 void migrate().catch(() => { console.error('Migration failed'); process.exitCode = 1; });

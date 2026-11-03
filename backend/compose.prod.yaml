@@ -1,0 +1,42 @@
+# Local Compose secrets are mounted files, not a full external secret manager.
+# Provision both secret files securely outside the repository.
+services:
+  postgres:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+  api:
+    image: ${API_IMAGE:?set a versioned API_IMAGE}
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+    secrets:
+      - database_url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 1.0
+volumes:
+  postgres_data:
+secrets:
+  postgres_password:
+    file: ${POSTGRES_PASSWORD_FILE:?set POSTGRES_PASSWORD_FILE}
+  database_url:
+    file: ${DATABASE_URL_FILE:?set DATABASE_URL_FILE}

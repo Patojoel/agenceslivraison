@@ -1,5 +1,6 @@
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { Pool } from 'pg';
+import { requiredMigrations } from './migrations';
 
 export const DATABASE_POOL = Symbol('DATABASE_POOL');
 @Controller('health')
@@ -8,10 +9,9 @@ export class HealthController {
   @Get('live') live() { return { status: 'ok' }; }
   @Get('ready') async ready() {
     try {
-      const result = await this.pool.query<{ installed: boolean }>("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_migrations') AS installed");
-      if (!result.rows[0]?.installed) throw new Error('migration missing');
-      const migration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version = $1", ['0001_initial']);
-      if (migration.rowCount !== 1) throw new Error('migration missing');
+      const required = requiredMigrations();
+      const result = await this.pool.query<{ hash: string; created_at: string }>('SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at');
+      if (result.rows.length !== required.length || result.rows.some((row, index) => row.hash !== required[index].hash || Number(row.created_at) !== required[index].folderMillis)) throw new Error('Migration history mismatch');
       return { status: 'ok' };
     } catch { throw new ServiceUnavailableException('Database not ready'); }
   }

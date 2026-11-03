@@ -13,6 +13,6 @@ test('readiness fails closed when database is unavailable', async () => {
   await assert.rejects(new HealthController(pool).ready(), { status: 503 });
 });
 test('readiness fails when migration has not run', async () => {
-  const pool = { query: async () => ({ rows: [{ installed: false }] }) } as unknown as Pool;
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
   await assert.rejects(new HealthController(pool).ready(), { status: 503 });
 });
