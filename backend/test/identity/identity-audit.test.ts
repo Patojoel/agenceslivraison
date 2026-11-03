@@ -1,15 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { IdentityAuditSubscriber } from '../../src/modules/identity/application/subscribers/identity-audit.subscriber';
+import { IdentityEvent } from '../../src/modules/identity/domain/events/identity-events';
 import { InMemoryAuditLog, uuid } from '../support/fakes';
 
 test('each identity event produces one audit entry for the acting user', async () => {
   const audit = new InMemoryAuditLog();
   const subscriber = new IdentityAuditSubscriber(audit);
-  await subscriber.handle({ type: 'UserRegistered', userId: uuid(1) } as const);
-  await subscriber.handle({ type: 'SessionOpened', userId: uuid(1), sessionId: uuid(2) } as const);
-  await subscriber.handle({ type: 'SessionRefreshed', userId: uuid(1), sessionId: uuid(2) } as const);
-  await subscriber.handle({ type: 'SessionRevoked', userId: uuid(1), sessionId: uuid(2) } as const);
+  const events: IdentityEvent[] = [
+    { type: 'UserRegistered', userId: uuid(1) },
+    { type: 'SessionOpened', userId: uuid(1), sessionId: uuid(2) },
+    { type: 'SessionRefreshed', userId: uuid(1), sessionId: uuid(2) },
+    { type: 'SessionRevoked', userId: uuid(1), sessionId: uuid(2) },
+  ];
+  for (const event of events) await subscriber.handle(event);
   assert.deepEqual(audit.entries, [
     { userId: uuid(1), action: 'user.registered' },
     { userId: uuid(1), action: 'session.login' },
