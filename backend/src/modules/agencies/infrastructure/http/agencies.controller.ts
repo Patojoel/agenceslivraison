@@ -16,12 +16,12 @@ export class AgenciesController {
   constructor(@Inject(DATABASE_POOL) private readonly pool: Pool) {}
   @Get(':agencyId/onboarding')
   @Header('Cache-Control', 'no-store')
-  @ApiOkResponse({ schema: { type: 'object', required: ['id', 'name', 'status'], properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string', nullable: true }, status: { type: 'string', enum: ['draft', 'submitted'] } } } })
-  async onboarding(@Headers('authorization') authorization: string | undefined, @Param('agencyId') agencyId: string): Promise<{ id: string; name: string | null; status: string }> {
+  @ApiOkResponse({ schema: { type: 'object', required: ['id', 'name', 'phone', 'city', 'version', 'status'], properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string', nullable: true }, phone: { type: 'string', nullable: true }, city: { type: 'string', nullable: true }, version: { type: 'integer' }, status: { type: 'string', enum: ['draft', 'submitted'] } } } })
+  async onboarding(@Headers('authorization') authorization: string | undefined, @Param('agencyId') agencyId: string): Promise<{ id: string; name: string | null; phone: string | null; city: string | null; version: number; status: string }> {
     const user = await authenticateUser(this.pool, authorization);
     if (!z.string().uuid().safeParse(agencyId).success) throw new BadRequestException();
-    const result = await this.pool.query<{ id: string; name: string | null; status: string }>(
-      'SELECT a.id, a.name, a.status FROM agencies a JOIN agency_memberships m ON m.agency_id = a.id WHERE a.id = $1 AND m.user_id = $2 AND m.active = true', [agencyId, user.id],
+    const result = await this.pool.query<{ id: string; name: string | null; phone: string | null; city: string | null; version: number; status: string }>(
+      'SELECT a.id, a.name, a.phone, a.city, a.version, a.status FROM agencies a JOIN agency_memberships m ON m.agency_id = a.id WHERE a.id = $1 AND m.user_id = $2 AND m.active = true', [agencyId, user.id],
     );
     if (!result.rows[0]) throw new NotFoundException();
     return result.rows[0];

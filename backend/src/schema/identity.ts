@@ -37,12 +37,16 @@ export const identityAudit = pgTable('identity_audit', {
 export const agencies = pgTable('agencies', {
   id: uuid('id').primaryKey(),
   name: text('name'),
+  phone: text('phone'),
+  city: text('city'),
+  version: integer('version').notNull().default(1),
   status: text('status').notNull().default('draft'),
   createdBy: uuid('created_by').references(() => users.id),
   creationKey: uuid('creation_key'),
   creationName: text('creation_name'),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
 }, (table) => [
+  check('agencies_version_positive', sql`${table.version} > 0`),
   check('agencies_valid_status', sql`${table.status} IN ('draft', 'submitted')`),
   check('agencies_creation_metadata_complete', sql`(${table.createdBy} IS NULL AND ${table.creationKey} IS NULL AND ${table.creationName} IS NULL) OR (${table.createdBy} IS NOT NULL AND ${table.creationKey} IS NOT NULL AND ${table.creationName} IS NOT NULL)`),
   uniqueIndex('agencies_creation_key_unique').on(table.createdBy, table.creationKey),
