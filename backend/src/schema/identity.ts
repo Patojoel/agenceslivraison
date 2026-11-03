@@ -36,7 +36,17 @@ export const identityAudit = pgTable('identity_audit', {
 // Agency onboarding will enrich this identity with its business profile.
 export const agencies = pgTable('agencies', {
   id: uuid('id').primaryKey(),
-});
+  name: text('name'),
+  status: text('status').notNull().default('draft'),
+  createdBy: uuid('created_by').references(() => users.id),
+  creationKey: uuid('creation_key'),
+  creationName: text('creation_name'),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+}, (table) => [
+  check('agencies_valid_status', sql`${table.status} IN ('draft', 'submitted')`),
+  check('agencies_creation_metadata_complete', sql`(${table.createdBy} IS NULL AND ${table.creationKey} IS NULL AND ${table.creationName} IS NULL) OR (${table.createdBy} IS NOT NULL AND ${table.creationKey} IS NOT NULL AND ${table.creationName} IS NOT NULL)`),
+  uniqueIndex('agencies_creation_key_unique').on(table.createdBy, table.creationKey),
+]);
 
 export const agencyMemberships = pgTable('agency_memberships', {
   id: uuid('id').primaryKey(),

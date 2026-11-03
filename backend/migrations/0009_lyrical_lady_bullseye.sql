@@ -1,0 +1,3 @@
+ALTER TABLE "agencies" DROP CONSTRAINT "agencies_creation_metadata_complete";--> statement-breakpoint
+ALTER TABLE "agencies" ADD COLUMN "creation_name" text;--> statement-breakpoint
+ALTER TABLE "agencies" ADD CONSTRAINT "agencies_creation_metadata_complete" CHECK (("agencies"."created_by" IS NULL AND "agencies"."creation_key" IS NULL AND "agencies"."creation_name" IS NULL) OR ("agencies"."created_by" IS NOT NULL AND "agencies"."creation_key" IS NOT NULL AND "agencies"."creation_name" IS NOT NULL));

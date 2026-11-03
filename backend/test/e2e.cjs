@@ -135,6 +135,32 @@ const { Client } = require('pg');
     const claims = require('jsonwebtoken').verify(tokens.accessToken, env.JWT_SECRET, { algorithms: ['HS256'], issuer: 'agenceslivraison', audience: 'agenceslivraison-api' });
     assert.equal(claims.sub, account.id);
     assert.equal(tokens.refreshToken.split('.')[0], claims.sid);
+    const creationKey = '00000000-0000-4000-8000-000000000099';
+    const createAgency = (key, name, token = tokens.accessToken) => fetch('http://127.0.0.1:3107/api/v1/agencies', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'idempotency-key': key }, body: JSON.stringify({ name }) });
+    const drafts = await Promise.all([createAgency(creationKey, 'Agence Douala'), createAgency(creationKey, 'Agence Douala')]);
+    assert.deepEqual(drafts.map(r => r.status), [201, 201]);
+    const draftResults = await Promise.all(drafts.map(r => r.json()));
+    assert.equal(draftResults[0].id, draftResults[1].id, 'same request creates only one agency');
+    assert.equal(draftResults[0].status, 'draft');
+    const onboarding = (agencyId, token = tokens.accessToken) => fetch(`http://127.0.0.1:3107/api/v1/agencies/${agencyId}/onboarding`, { headers: { authorization: `Bearer ${token}` } });
+    const currentDraft = await onboarding(draftResults[0].id);
+    assert.equal(currentDraft.status, 200);
+    assert.deepEqual(await currentDraft.json(), { id: draftResults[0].id, name: 'Agence Douala', status: 'draft' });
+    assert.equal((await onboarding('00000000-0000-4000-8000-000000000011')).status, 404, 'foreign agency hidden');
+    assert.equal((await onboarding(draftResults[0].id, 'invalid')).status, 401);
+
+    assert.equal((await createAgency(creationKey, 'Autre agence')).status, 409, 'key cannot be reused for different input');
+    assert.equal((await createAgency('invalid', 'Agence')).status, 400);
+    assert.equal((await createAgency(creationKey, 'Agence', 'invalid')).status, 401);
+    const creationPool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
+    try {
+      const createdMembership = await creationPool.query('SELECT role, user_id FROM agency_memberships WHERE agency_id = $1', [draftResults[0].id]);
+      assert.equal(createdMembership.rowCount, 1);
+      assert.equal(createdMembership.rows[0].role, 'owner');
+      assert.equal(createdMembership.rows[0].user_id, account.id);
+      const audit = await creationPool.query("SELECT count(*)::int AS total FROM identity_audit WHERE agency_id = $1 AND action = 'agency.draft_created'", [draftResults[0].id]);
+      assert.equal(audit.rows[0].total, 1);
+    } finally { await creationPool.end(); }
     const agencyPool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
     const httpAgency = '00000000-0000-4000-8000-000000000020';
     const foreignAgency = '00000000-0000-4000-8000-000000000021';
@@ -204,6 +230,7 @@ const { Client } = require('pg');
     assert.ok(spec.paths['/api/v1/auth/refresh']);
     assert.ok(spec.paths['/api/v1/auth/logout']);
     assert.ok(spec.paths['/api/v1/me']);
+    assert.ok(spec.paths['/api/v1/agencies']);
     console.log('E2E: HTTP, PostgreSQL, migrations and OpenAPI passed');
   } finally { app.kill('SIGTERM'); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -46,7 +46,7 @@ Toutes ces routes demandent `Authorization: Bearer <accessToken>`. Un membre ext
 - `PATCH /api/v1/agencies/{agencyId}/members/{memberId}` prend `{ "role": "admin" }` (`owner`, `admin`, `agent`) et renvoie **200** avec `{ "success": true }`. `memberId` est l'identifiant du membership, pas l'identifiant utilisateur.
 - `DELETE /api/v1/agencies/{agencyId}/members/{memberId}` désactive le membership et renvoie **200** avec `{ "success": true }`. Aucun membre ne peut modifier ou supprimer son propre accès avec ces routes ; la suppression du dernier propriétaire renvoie **409**.
 
-Politique initiale : un propriétaire gère les rôles et invite des administrateurs ou agents ; un administrateur peut inviter et gérer uniquement des agents ; un agent ne gère pas les accès. L'invitation ne crée pas de propriétaire. La création de l'agence et de son premier propriétaire fait partie du prochain lot d'onboarding ; ces routes nécessitent donc une agence et des memberships déjà existants.
+Politique initiale : un propriétaire gère les rôles et invite des administrateurs ou agents ; un administrateur peut inviter et gérer uniquement des agents ; un agent ne gère pas les accès. L'invitation ne crée pas de propriétaire. La [création du brouillon](agences.md) attribue le premier rôle propriétaire au compte créateur.
 
 ## Parcours prévus
 
@@ -65,4 +65,4 @@ Les chemins suivants restent indicatifs ; les routes décrites ci-dessus sont di
 
 Les chemins prévus peuvent évoluer. Leurs champs, formats de session, codes d'erreur et autorisations ne sont pas encore définis ; ne pas générer de formulaires ou de clients API en supposant leurs valeurs. Le cadrage prévoit plusieurs agences par utilisateur, une agence active validée côté serveur, la protection du dernier propriétaire et l'interdiction de s'attribuer soi-même un rôle supérieur.
 
-Le domaine contient les premiers contrôles de membership (agence active, protection du dernier propriétaire et absence d'élévation personnelle). Les sessions disposent de tables PostgreSQL et d'une rotation conditionnelle testée en concurrence. Les sessions sont reliées aux endpoints décrits ci-dessus. Les changements de membres et les invitations sont autorisés et audités ; la création initiale des agences reste à développer.
+Le domaine contient les premiers contrôles de membership (agence active, protection du dernier propriétaire et absence d'élévation personnelle). Les sessions disposent de tables PostgreSQL et d'une rotation conditionnelle testée en concurrence. Les sessions sont reliées aux endpoints décrits ci-dessus. Les changements de membres et les invitations sont autorisés et audités ; la soumission et l'approbation des agences restent à développer.
