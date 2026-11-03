@@ -11,13 +11,20 @@ import { DataSource, EntityManager } from 'typeorm';
 export class TypeOrmDatabaseConnection {
   private readonly scope = new AsyncLocalStorage<EntityManager>();
   private opening: Promise<DataSource> | null = null;
+  private ready = false;
 
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  /** Retried on the next call after a failure, so the API recovers once PostgreSQL is back. */
+  /**
+   * TypeORM sets `isInitialized` before `initialize()` has built the metadata, so readiness is only
+   * trusted once the promise resolved; concurrent callers share it. Retried after a failure, so the
+   * API recovers once PostgreSQL is back.
+   */
   async open(): Promise<DataSource> {
-    if (this.dataSource.isInitialized) return this.dataSource;
-    this.opening ??= this.dataSource.initialize().finally(() => { this.opening = null; });
+    if (this.ready && this.dataSource.isInitialized) return this.dataSource;
+    this.opening ??= this.dataSource.initialize()
+      .then(() => { this.ready = true; return this.dataSource; })
+      .finally(() => { this.opening = null; });
     return this.opening;
   }
 

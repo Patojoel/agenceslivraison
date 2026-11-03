@@ -16,6 +16,8 @@ export const buildDataSourceOptions = (env: Pick<Env, 'DATABASE_URL' | 'DATABASE
   migrationsRun: false,
   synchronize: false,
   logging: false,
+  // An undefined or null criterion would silently drop the condition (and widen the query): refuse it.
+  invalidWhereValuesBehavior: { undefined: 'throw', null: 'throw' },
   extra: { connectionTimeoutMillis: 3000 },
 });
 

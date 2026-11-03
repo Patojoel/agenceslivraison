@@ -1,4 +1,5 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
+import { DrizzleHistoryRow, findDrizzleAdoptionProblem } from '@shared/infrastructure/persistence/typeorm/drizzle-adoption';
 
 /** Final state of the Drizzle migrations 0001 to 0006, which this baseline replaces. */
 const STATEMENTS = [
@@ -60,8 +61,6 @@ const STATEMENTS = [
   'CREATE UNIQUE INDEX "agency_invitations_token_unique" ON "agency_invitations" USING btree ("token_digest")',
 ];
 
-const DRIZZLE_MIGRATIONS = 7;
-
 export class Baseline1793710789928 implements MigrationInterface {
   name = 'Baseline1793710789928';
 
@@ -74,8 +73,12 @@ export class Baseline1793710789928 implements MigrationInterface {
     const [drizzle] = await queryRunner.query(`SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS exists`);
     if (drizzle?.exists) {
       // A database created by the Drizzle releases already has this exact schema: adopt it as is.
-      const [history] = await queryRunner.query('SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations');
-      if (history?.count !== DRIZZLE_MIGRATIONS) throw new Error('Apply every Drizzle migration with the previous release first');
+      const history: DrizzleHistoryRow[] = await queryRunner.query('SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id');
+      const indexes: { indexname: string }[] = await queryRunner.query(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexdef LIKE 'CREATE UNIQUE INDEX%'",
+      );
+      const problem = findDrizzleAdoptionProblem(history, indexes.map(row => row.indexname));
+      if (problem) throw new Error(problem);
       return;
     }
     for (const statement of STATEMENTS) await queryRunner.query(statement);

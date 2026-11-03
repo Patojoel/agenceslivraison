@@ -18,10 +18,10 @@ Tableau de bord vivant du projet. Le détail de chaque tâche (règles, endpoint
 
 | Élément | Valeur |
 |---|---|
-| Lot backend courant | B2 — Onboarding agence (non commencé) |
+| Lot backend courant | B2 — Onboarding agence (S1 en cours) |
 | Branche | `refactor/architecture-normalisee` |
-| Mode de session | défini par le user en début de session (light / full) |
-| Tâche en cours | `[~]` B0.12 — revue sécurité faite (aucun critique) ; corrections R1 à R4 à valider par le user |
+| Mode de session | light (session du 2026-11-03) |
+| Tâches en cours | `[~]` B2.S1 — use cases de l'onboarding (`use-case-writer`) |
 
 ### Refactor architecture + TypeORM — commité (2026-11-03)
 Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranchée en faveur de TypeORM et de l'architecture normalisée. `CLAUDE.md`, les agents (`back-builder`, `archi-reviewer`, `query-perf`), `phases.md` et `backend/docs/` sont alignés. Décision et conventions : [docs/architecture/](docs/architecture/).
@@ -32,7 +32,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 
 | Phase | Intitulé | Statut | Avancement |
 |---|---|---|---|
-| B0 | Socle technique | terminé (sauvegarde à valider en cible ; B0.12 : corrections de revue à faire) | 10/12 |
+| B0 | Socle technique | terminé (sauvegarde à valider en cible) | 11/12 |
 | B1 | Identité, sessions, memberships | terminé, re-vérifié après refactor (rate limit partagé et constats de revue B1.13–B1.14 à traiter) | 11/14 |
 | B2 | Onboarding agence | à faire | 0/9 |
 | B3 | Tarifs, zones, marketplace publique | à faire | 0/13 |
@@ -67,12 +67,12 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [x] B0.9 Tests unitaires et `test/e2e.cjs`
 - [x] B0.10 CI `.github/workflows/backend.yml`
 - [~] B0.11 Sauvegarde chiffrée hors VPS — procédure documentée, restauration testée en local ; rétention, calendrier et validation sur l'infrastructure cible restent à faire
-- [~] B0.12 Architecture normalisée + passage à TypeORM (commit `293a35b`) — lint, typecheck, 49 tests unitaires, build, E2E Docker (aussi avec `TEST_LEGACY=1`), `migration:check` sans écart sur base neuve et sur base Drizzle existante, refus d'un historique Drizzle partiel, `npm audit --omit=dev` à 0 : vérifiés. Revue `security-reviewer` faite le 2026-11-03 : aucun critique, isolation, verrous `FOR UPDATE`, authentification et secrets jugés sains. Reste à traiter :
-  - [ ] R1 *(à corriger)* E2E : 404 sur `POST /agencies/{autre}/invitations` et double acceptation concurrente d'une invitation (une seule réussit)
-  - [ ] R2 *(régression du refactor)* `TypeOrmDatabaseConnection.open()` : une requête concurrente pendant la première ouverture voit `isInitialized` avant la fin de `initialize()` → 500 ; attendre la promesse d'ouverture en cours
-  - [ ] R3 *(régression du refactor)* adoption d'une base Drizzle : comparer les 7 empreintes Drizzle d'origine (et non leur seul nombre) et vérifier la présence des index uniques critiques ; contrôle par empreinte des migrations TypeORM à décider
-  - [ ] R4 *(durcissement)* `invalidWhereValuesBehavior: { undefined: 'throw', null: 'throw' }` dans la configuration TypeORM
-  - [ ] R5 *(note pour plus tard)* journalisation des erreurs : ne jamais écrire un `QueryFailedError` entier (il porte SQL et paramètres), seulement code, contrainte et `traceId`
+- [x] B0.12 Architecture normalisée + passage à TypeORM (commit `293a35b`, corrections de revue ensuite) — lint, typecheck, 49 tests unitaires, build, E2E Docker (aussi avec `TEST_LEGACY=1`), `migration:check` sans écart sur base neuve et sur base Drizzle existante, refus d'un historique Drizzle partiel, `npm audit --omit=dev` à 0 : vérifiés. Revue `security-reviewer` faite le 2026-11-03 : aucun critique, isolation, verrous `FOR UPDATE`, authentification et secrets jugés sains. Corrections appliquées et vérifiées (lint, typecheck, 58/58 tests, build, E2E Docker, adoption Drizzle sur PostgreSQL réel) ; non re-revues par `security-reviewer` :
+  - [x] R1 *(à corriger)* E2E : 404 sur `POST /agencies/{autre}/invitations` et double acceptation concurrente d'une invitation (une seule réussit)
+  - [x] R2 *(régression du refactor)* `TypeOrmDatabaseConnection.open()` : une requête concurrente pendant la première ouverture voit `isInitialized` avant la fin de `initialize()` → 500 ; attendre la promesse d'ouverture en cours — drapeau `ready` posé à la résolution, nouvelle tentative après échec, 3 tests unitaires
+  - [x] R3 *(régression du refactor)* adoption d'une base Drizzle : les 7 empreintes et horodatages Drizzle d'origine sont comparés et les 4 index uniques critiques vérifiés (`drizzle-adoption.ts`, 6 tests unitaires) ; base authentique adoptée, empreinte, horodatage ou index modifiés refusés sur PostgreSQL réel. Contrôle par empreinte des migrations TypeORM : décision D-12
+  - [x] R4 *(durcissement)* `invalidWhereValuesBehavior: { undefined: 'throw', null: 'throw' }` dans la configuration TypeORM
+  - [ ] R5 *(note, suivie en B10.18)* journalisation des erreurs : ne jamais écrire un `QueryFailedError` entier (il porte SQL et paramètres), seulement code, contrainte et `traceId`
 
 ### B1 — Identité, sessions, memberships, rôles (CRITIQUE)
 - [x] B1.1 `POST /auth/register`
@@ -93,7 +93,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 > État B0/B1 relevé dans `backend/docs/` et le code au 2026-11-03, puis re-vérifié après le refactor `293a35b` : tous les parcours B1 sont couverts par `test/e2e.cjs`, passé dans Docker le 2026-11-03.
 
 ### B2 — Onboarding agence (CRITIQUE)
-Étapes : [ ] S1 use cases · [ ] S2 plan validé · [ ] S3 domaine · [ ] S4 application · [ ] S5 persistance · [ ] S6 HTTP · [ ] S7 E2E · [ ] S8 docs · [ ] S9 revues · [ ] S10 clôture
+Étapes : [~] S1 use cases · [ ] S2 plan validé · [ ] S3 domaine · [ ] S4 application · [ ] S5 persistance · [ ] S6 HTTP · [ ] S7 E2E · [ ] S8 docs · [ ] S9 revues · [ ] S10 clôture
 - [ ] B2.1 Créer brouillon + premier propriétaire
 - [ ] B2.2 Compléter l'identité
 - [ ] B2.3 Zones desservies
@@ -247,7 +247,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [ ] B10.15 Exports
 - [ ] B10.16 Règles reporting
 - [ ] B10.17 Mesures de performance
-- [ ] B10.18 Revue sécurité, correlationId
+- [ ] B10.18 Revue sécurité, correlationId (inclut B0.12 R5 : ne journaliser d'un `QueryFailedError` que code, contrainte et `traceId`)
 - [ ] B10.19 Rate limit partagé, RLS évaluée
 - [ ] B10.20 Sauvegarde validée en cible
 
@@ -347,6 +347,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | D-09 | Responsabilité inter-agences, SLA, politique d'écart et de retours | B8, B9 | ouverte |
 | D-10 | Responsables de validation et critères de certification des agences | B10 | ouverte |
 | D-11 | Rétention et calendrier des sauvegardes | B0.11, B10.20 | ouverte |
+| D-12 | Détecter une migration TypeORM modifiée après application (empreinte par migration) ; afficher ou non au migrateur le motif d'un refus d'adoption Drizzle (message sans donnée) | B10.18 | ouverte |
 
 Décisions prises :
 - 2026-11-03 — **D-01** : TypeORM 0.3 sur PostgreSQL (écart assumé à l'ADR-02) et architecture normalisée des modules ; tests conservés sous `node:test`, colocalisés dans `src/**/tests/`. Voir [docs/architecture/adr-001-typeorm-et-architecture-normalisee.md](docs/architecture/adr-001-typeorm-et-architecture-normalisee.md).
@@ -358,6 +359,7 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-03 | `back-builder` (mode light, rapport appliqué par la session principale) | B0.12 — corrections R1 à R4 de la revue sécurité | Vert : R1 E2E (404 invitation autre agence, acceptation concurrente 200/404, un seul membership), R2 `open()` attend `initialize()`, R3 adoption Drizzle par empreintes et index uniques (adoptée / refusée sur PostgreSQL réel), R4 `invalidWhereValuesBehavior` ; R5 → B10.18, empreinte des migrations TypeORM → D-12 | `npm run lint` OK · `npm run typecheck` OK · `npm test` 58/58 (relancé par la session principale) · `npm run build` OK · E2E `compose.test.yaml` OK (1re exécution en échec sur une assertion de test, corrigée) · vérification R3 sur `postgres:16-alpine` temporaire · `npm audit --omit=dev` 0 |
 | 2026-11-03 | `security-reviewer` (rapport appliqué par la session principale) | B0.12 — revue sécurité du commit `293a35b` | Aucun critique ; 1 à corriger (R1), 2 régressions du refactor (R2, R3), 2 durcissements (R4, R5) ; 2 constats antérieurs (B1.13, B1.14) | `git diff 5431052 293a35b`, lecture de `node_modules/typeorm`, `npm audit --omit=dev` (0) |
 | 2026-11-03 | Claude (session principale) | Documentation de D-01 et B0.12 | `docs/README.md`, `docs/architecture/architecture-backend.md`, `docs/architecture/adr-001-typeorm-et-architecture-normalisee.md` ; `phases.md` et ce fichier alignés | aucune (documentation) |
 | 2026-11-03 | Claude (session principale) | B0.12 — architecture normalisée + TypeORM (commit `293a35b`, mode light) | Vert ; contrat HTTP inchangé ; `CLAUDE.md`, agents et `backend/docs/` mis à jour ; revue sécurité lancée | `npm run lint` OK · `npm run typecheck` OK · `npm test` 49/49 · `npm run build` OK · `docker compose -f compose.test.yaml up --build …` E2E OK · `TEST_LEGACY=1 npm run test:e2e` OK · `typeorm migration:generate --check` « No changes » (base neuve et base Drizzle) · `npm audit --omit=dev` 0 vulnérabilité |
