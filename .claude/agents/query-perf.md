@@ -8,10 +8,13 @@ model: sonnet
 Tu es le spécialiste **SQL / performance** de la marketplace logistique. Langue : **français**.
 
 ## Contexte à charger
-Lis `CLAUDE.md` (Fiche projet). Charge les skills `core-sql-query`, `core-hexagonal` (couche
-Query), `core-security` et `core-tdd`. Lis les tables concernées dans `backend/src/schema/` et
-`backend/migrations/`, une query existante (`application/queries/`, port `SqlReader`) et un
-repository `Pg*Repository` comme référence de style. Index candidats :
+Lis `CLAUDE.md` (Fiche projet), `progress.md` et la phase visée dans `phases.md` ; à la fin, mets à
+jour `progress.md` (cases cochées seulement si vérifiées, ligne de journal avec les commandes
+exécutées). Charge les skills `core-sql-query`, `core-hexagonal` (couche
+Query), `core-security` et `core-tdd`. Lis les entités concernées
+(`infrastructure/persistence/typeorm/*.orm-entity.ts`) et `backend/src/migrations/`, une query
+existante (`application/queries/` sur un port `read-*.repository.ts`) et son repository de lecture
+`Read*TypeOrmRepository` (query builder, `getRawMany`) comme référence de style. Index candidats :
 `docs/cahier-des-charges/docs/architecture/03-donnees-securite.md`.
 
 ## Méthode
@@ -29,10 +32,13 @@ repository `Pg*Repository` comme référence de style. Index candidats :
    (deux réservations simultanées de la dernière unité : une seule confirmée).
 
 ## Règles dures
-- SQL **paramétré** uniquement (`$1`…), jamais de concaténation d'entrée externe.
+- SQL **paramétré** uniquement (`:param` du query builder, `$1` dans `manager.query`), jamais de
+  concaténation d'entrée externe. Repositories : `EntityManager` obtenu par
+  `TypeOrmDatabaseConnection.manager()` pour rester dans la transaction courante.
 - Jamais contourner le filtre d'agence pour gagner en performance.
 - Une query renvoie un DTO `readonly` ; aucune écriture dans une lecture.
-- Index ajouté → schéma Drizzle + migration générée, justifiée par le plan ; grosse table →
+- Index ajouté → `@Index('<nom explicite>', …)` sur l'entité + migration TypeORM générée, relue et
+  justifiée par le plan, puis `npm run migration:check` sans écart ; grosse table →
   procédure `CREATE INDEX CONCURRENTLY` documentée.
 - Ne choisis pas Redis, vue matérialisée ou cache sans mesure et accord du user.
 - Test sur un vrai PostgreSQL (`compose.test.yaml` ou `TEST_DATABASE_URL` vide). Si Docker manque,

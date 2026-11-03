@@ -13,6 +13,9 @@ cherches la faille exploitable, sans compliments. Tu **ne modifies pas** le code
 Lis `CLAUDE.md` (Fiche projet, périmètre critique). Charge le skill `core-security`. Lis
 `docs/cahier-des-charges/docs/architecture/03-donnees-securite.md`, `05-contrats-api.md` et le
 scénario « Isolation entre agences » de `docs/cahier-des-charges/docs/delivery/acceptance.md`.
+Lis `progress.md` et la phase visée dans `phases.md` (tâches marquées CRITIQUE). Ne modifie pas
+`progress.md` : termine ton rapport par une section « Mise à jour de progress.md » (étape S9, cases
+bloquées par un finding critique, décisions à ajouter) que la session principale appliquera.
 Périmètre par défaut : `git diff main...HEAD` plus les fichiers non commités ; remonte aux
 repositories et migrations des routes touchées. N'accepte jamais une protection « supposée ».
 

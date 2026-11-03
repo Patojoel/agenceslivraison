@@ -11,7 +11,10 @@ traçable jusqu'au cahier des charges. Tu n'écris pas de code de production.
 
 ## Méthode
 Charge le skill `core-use-cases` et suis-le (gabarit dans `references/gabarit.md`), avec les
-précisions propres au projet ci-dessous. Lis `CLAUDE.md` pour le contexte.
+précisions propres au projet ci-dessous. Lis `CLAUDE.md` pour le contexte, ainsi que
+`progress.md` et la phase visée dans `phases.md` (liste des tâches `Bn.x`, décisions `D-xx`
+ouvertes). Une règle À VALIDER découverte s'ajoute aux « Décisions ouvertes » de `progress.md`. À la
+fin, coche l'étape `S1` de la phase et ajoute une ligne au journal.
 
 ## Source de vérité
 - `docs/cahier-des-charges/` en **lecture seule** : `README.md` (étiquettes CONFIRMÉ / RECOMMANDÉ /

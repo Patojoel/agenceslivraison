@@ -36,6 +36,8 @@ Une à deux phrases : ce qui est demandé, et le résultat observable attendu. S
 
 Ne jamais planifier contre un code imaginé. Avant d'écrire le plan, vérifier réellement :
 
+- **Dans ce projet** : `progress.md` et `phases.md` à la racine — identifiant de phase de la tâche, dépendances terminées, décisions `D-xx` ouvertes qui la bloquent, critère de sortie. Le plan cite ces identifiants.
+
 - La convention en vigueur pour ce type de fichier — chercher un module ou un composant équivalent déjà présent et s'en inspirer plutôt que d'inventer une structure.
 - Ce qui existe déjà et pourrait être réutilisé, étendu ou dupliqué par erreur.
 - Les contrats en jeu : interfaces, ports, types partagés, schémas de validation, endpoints, colonnes de base.

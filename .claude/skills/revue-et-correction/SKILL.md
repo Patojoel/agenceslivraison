@@ -98,6 +98,8 @@ Pour chaque problème bloquant ou majeur corrigé, se demander ce qui empêchera
 
 Sans ce verrou, la même erreur reviendra — souvent introduite par la personne qui l'avait corrigée.
 
+**Dans ce projet** : reporter le résultat dans `progress.md` à la racine (cases vérifiées, ligne de journal avec les commandes exécutées, problèmes restants en `[~]` ou en décision ouverte).
+
 ## Interdits
 
 Ces raccourcis rendent le code **moins sûr qu'avant la revue**. Ne jamais les utiliser pour faire passer une vérification, quelle que soit la pression :
