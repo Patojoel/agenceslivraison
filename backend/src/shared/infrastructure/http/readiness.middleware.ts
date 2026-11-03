@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
-import { HealthController } from './health.controller';
-import { sendProblem } from './problem-details';
+import { HealthController } from '../health/health.controller';
+import { sendProblem } from './problem-details.filter';
 
 /** Keep probes accessible while preventing traffic before migrations are ready. */
 export function readinessMiddleware(health: HealthController) {

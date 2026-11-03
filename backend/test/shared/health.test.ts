@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Pool } from 'pg';
-import { HealthController } from '../src/health.controller';
+import { HealthController } from '../../src/shared/infrastructure/health/health.controller';
 
 test('liveness does not require a database', () => {
   const pool = { query: () => { throw new Error('database down'); } } as unknown as Pool;

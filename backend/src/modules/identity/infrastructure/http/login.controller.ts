@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { sign } from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { DATABASE_POOL } from '../../../../health.controller';
+import { DATABASE_POOL } from '../../../../shared/infrastructure/db/create-pool';
 
 const dummyHash = '$argon2id$v=19$m=19456,t=2,p=1$sDbt/mYsiVrBeP80Np+K5g$PAxLDo8DSXHkzA4CN0JJy5WUpK1BOVUSQxeCrevR2+k';
 const inputSchema = z.object({ email: z.string().trim().email().max(254).transform(value => value.toLowerCase()), password: z.string().min(1).max(128).refine(value => Buffer.byteLength(value, 'utf8') <= 256) }).strict();

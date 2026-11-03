@@ -2,7 +2,7 @@ import { BadRequestException, Body, ConflictException, Controller, Delete, Forbi
 import { ApiBearerAuth, ApiBody, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { DATABASE_POOL } from '../../../../health.controller';
+import { DATABASE_POOL } from '../../../../shared/infrastructure/db/create-pool';
 import { LastOwner, MembershipForbidden, MembershipNotFound, MembershipRepository } from '../membership-repository';
 import { authenticateUser } from './session.controller';
 

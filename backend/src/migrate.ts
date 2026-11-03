@@ -1,10 +1,10 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate as drizzleMigrate } from 'drizzle-orm/node-postgres/migrator';
-import { createDatabase } from './database';
-import { requiredMigrations } from './migrations';
+import { createPool } from './shared/infrastructure/db/create-pool';
+import { requiredMigrations } from './shared/infrastructure/db/migrations';
 async function migrate() {
   const migrations = requiredMigrations();
-  const { pool } = createDatabase();
+  const pool = createPool();
   const client = await pool.connect();
   try {
     await client.query('SELECT pg_advisory_lock($1)', [19188412]);

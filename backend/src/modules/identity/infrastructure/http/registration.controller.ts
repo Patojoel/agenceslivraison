@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import * as argon2 from 'argon2';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { DATABASE_POOL } from '../../../../health.controller';
+import { DATABASE_POOL } from '../../../../shared/infrastructure/db/create-pool';
 
 const inputSchema = z.object({
   email: z.string().trim().email().max(254).transform(value => value.toLowerCase()),

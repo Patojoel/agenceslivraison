@@ -1,8 +1,8 @@
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { Pool } from 'pg';
-import { requiredMigrations } from './migrations';
+import { DATABASE_POOL } from '../db/create-pool';
+import { requiredMigrations } from '../db/migrations';
 
-export const DATABASE_POOL = Symbol('DATABASE_POOL');
 @Controller('health')
 export class HealthController {
   constructor(@Inject(DATABASE_POOL) private readonly pool: Pool) {}

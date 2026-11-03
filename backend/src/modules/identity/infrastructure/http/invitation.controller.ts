@@ -4,7 +4,7 @@ import { Throttle } from '@nestjs/throttler';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { DATABASE_POOL } from '../../../../health.controller';
+import { DATABASE_POOL } from '../../../../shared/infrastructure/db/create-pool';
 import { authenticateUser } from './session.controller';
 const invitation = z.object({ email: z.string().trim().email().max(254).transform(v => v.toLowerCase()), role: z.enum(['admin', 'agent']) }).strict();
 const accept = z.object({ token: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.[A-Za-z0-9_-]{43}$/) }).strict();

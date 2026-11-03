@@ -2,9 +2,9 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { HealthController } from './health.controller';
-import { readinessMiddleware } from './readiness-middleware';
-import { ProblemDetailsFilter } from './problem-details';
+import { HealthController } from './shared/infrastructure/health/health.controller';
+import { readinessMiddleware } from './shared/infrastructure/http/readiness.middleware';
+import { ProblemDetailsFilter } from './shared/infrastructure/http/problem-details.filter';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api/v1');

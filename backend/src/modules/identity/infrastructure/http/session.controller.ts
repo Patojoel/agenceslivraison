@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { sign, verify, JwtPayload } from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { DATABASE_POOL } from '../../../../health.controller';
+import { DATABASE_POOL } from '../../../../shared/infrastructure/db/create-pool';
 import { accessKey } from './login.controller';
 
 const inputSchema = z.object({ refreshToken: z.string().max(80).regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.[A-Za-z0-9_-]{43}$/) }).strict();
