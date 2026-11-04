@@ -19,6 +19,7 @@ export class TypeOrmAuditLog implements AuditLog {
       action: entry.action,
       agencyId: entry.agencyId ?? null,
       subjectUserId: entry.subjectUserId ?? null,
+      details: entry.details ? { fields: [...entry.details.fields] } : null,
     });
   }
 }

@@ -8,6 +8,10 @@ function toAuditEntry(event: AgencyEvent): AuditEntry {
   switch (event.type) {
     case 'AgencyRegistered':
       return { userId: event.actorId, action: 'agency.created', agencyId: event.agencyId };
+    case 'AgencyIdentityUpdated':
+      return { userId: event.actorId, action: 'agency.identity_updated', agencyId: event.agencyId, details: { fields: event.fields } };
+    case 'AgencyProfileUpdated':
+      return { userId: event.actorId, action: 'agency.profile_updated', agencyId: event.agencyId, details: { fields: event.fields } };
     case 'InvitationIssued':
       return { userId: event.actorId, action: 'invitation.created', agencyId: event.agencyId };
     case 'InvitationAccepted':

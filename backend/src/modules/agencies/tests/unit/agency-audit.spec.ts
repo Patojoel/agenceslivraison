@@ -29,3 +29,17 @@ test('identity events are ignored', async () => {
   await new AgencyAuditSubscriber(audit).handle({ type: 'UserRegistered' });
   assert.deepEqual(audit.entries, []);
 });
+
+test('identity and profile updates are audited with the names of the changed fields only', async () => {
+  const audit = new InMemoryAuditLog();
+  const subscriber = new AgencyAuditSubscriber(audit);
+  const events: AgencyEvent[] = [
+    { type: 'AgencyIdentityUpdated', agencyId: uuid(10), actorId: uuid(2), fields: ['primaryPhone', 'niu'] },
+    { type: 'AgencyProfileUpdated', agencyId: uuid(10), actorId: uuid(2), fields: ['description'] },
+  ];
+  for (const event of events) await subscriber.handle(event);
+  assert.deepEqual(audit.entries, [
+    { userId: uuid(2), action: 'agency.identity_updated', agencyId: uuid(10), details: { fields: ['primaryPhone', 'niu'] } },
+    { userId: uuid(2), action: 'agency.profile_updated', agencyId: uuid(10), details: { fields: ['description'] } },
+  ]);
+});

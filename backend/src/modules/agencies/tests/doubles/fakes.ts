@@ -1,9 +1,13 @@
 import { UserId } from '@shared/domain/value-objects/user-id';
+import { ReadAgencyRepository } from '../../application/ports/read-agency.repository';
+import { AgencyReadModel } from '../../application/read-models/agency.read-model';
 import { ReadAgencyOnboardingRepository } from '../../application/ports/read-agency-onboarding.repository';
 import { AgencyOnboardingReadModel } from '../../application/read-models/agency-onboarding.read-model';
 import { Agency } from '../../domain/agency';
 import { AgencyRole } from '../../domain/agency-role';
-import { AgencySnapshot } from '../../domain/agency.snapshot';
+import { AgencySnapshot, AgencyStatus } from '../../domain/agency.snapshot';
+import { EMPTY_IDENTITY } from '../../domain/agency-identity';
+import { TradeName } from '../../domain/value-objects/trade-name';
 import { AgencyTeam, Membership } from '../../domain/agency-team';
 import { Invitation } from '../../domain/invitation';
 import { InvitationSnapshot } from '../../domain/invitation.snapshot';
@@ -13,7 +17,7 @@ import { InvitationRepository } from '../../domain/ports/invitation.repository';
 import { AgencyId } from '../../domain/value-objects/agency-id';
 import { InvitationId } from '../../domain/value-objects/invitation-id';
 import { MembershipId } from '../../domain/value-objects/membership-id';
-import { uuid } from '@shared/tests/doubles/fakes';
+import { T0, uuid } from '@shared/tests/doubles/fakes';
 
 export const AGENCY = uuid(10);
 export const OTHER_AGENCY = uuid(11);
@@ -29,10 +33,28 @@ export function team(...memberships: Membership[]): AgencyTeam {
   return AgencyTeam.reconstitute(AgencyId.of(AGENCY), memberships);
 }
 
+export function anAgency(status: AgencyStatus = 'draft', version = 1, id = AGENCY): Agency {
+  return Agency.reconstitute({
+    id: AgencyId.of(id), tradeName: TradeName.of('Express Douala'), description: null, identity: EMPTY_IDENTITY,
+    status, version, createdBy: UserId.of(OWNER.user), createdAt: T0,
+  });
+}
+
 export class InMemoryAgencyRepository implements AgencyRepository {
   private readonly rows = new Map<string, AgencySnapshot>();
+  saves = 0;
 
   async add(agency: Agency): Promise<void> {
+    this.rows.set(agency.id.value, agency.snapshot());
+  }
+
+  async findById(id: AgencyId): Promise<Agency | null> {
+    const state = this.rows.get(id.value);
+    return state ? Agency.reconstitute(state) : null;
+  }
+
+  async save(agency: Agency): Promise<void> {
+    this.saves += 1;
     this.rows.set(agency.id.value, agency.snapshot());
   }
 
@@ -70,6 +92,15 @@ export class InMemoryReadAgencyOnboardingRepository implements ReadAgencyOnboard
   constructor(private readonly rows: readonly [string, string, AgencyOnboardingReadModel][]) {}
 
   async findForMember(agencyId: string, userId: string): Promise<AgencyOnboardingReadModel | null> {
+    return this.rows.find(([agency, user]) => agency === agencyId && user === userId)?.[2] ?? null;
+  }
+}
+
+/** Rows are `[agencyId, userId of an active member, projection]`. */
+export class InMemoryReadAgencyRepository implements ReadAgencyRepository {
+  constructor(private readonly rows: readonly [string, string, AgencyReadModel][]) {}
+
+  async findForMember(agencyId: string, userId: string): Promise<AgencyReadModel | null> {
     return this.rows.find(([agency, user]) => agency === agencyId && user === userId)?.[2] ?? null;
   }
 }

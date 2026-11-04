@@ -35,3 +35,21 @@ export class IdempotencyKeyReused extends DomainException {
 export class AgencyNotFound extends DomainException {
   constructor() { super('not_found', 'Agency not found'); }
 }
+
+/** Names the field only: the refused value is never kept, it may be personal data. */
+export class InvalidAgencyField extends DomainException {
+  constructor(readonly field: string) { super('invalid', `Invalid agency field: ${field}`); }
+}
+
+export class AgencyIdentityLocked extends DomainException {
+  constructor() { super('conflict', 'The identity of a submitted agency can no longer be modified'); }
+}
+
+/** The change was written against a version that is no longer the current one. */
+export class StaleAgencyVersion extends DomainException {
+  constructor() { super('conflict', 'The agency was modified in the meantime'); }
+}
+
+export class AgencyEditForbidden extends DomainException {
+  constructor() { super('forbidden', 'Not allowed to edit this agency'); }
+}

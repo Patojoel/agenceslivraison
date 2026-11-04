@@ -5,9 +5,13 @@ import { CreateAgencyHandler } from './application/commands/create-agency/create
 import { AcceptInvitationHandler } from './application/commands/accept-invitation/accept-invitation.handler';
 import { ChangeMemberRoleHandler } from './application/commands/change-member-role/change-member-role.handler';
 import { IssueInvitationHandler } from './application/commands/issue-invitation/issue-invitation.handler';
+import { UpdateAgencyIdentityHandler } from './application/commands/update-agency-identity/update-agency-identity.handler';
+import { UpdateAgencyProfileHandler } from './application/commands/update-agency-profile/update-agency-profile.handler';
 import { RevokeMembershipHandler } from './application/commands/revoke-membership/revoke-membership.handler';
+import { READ_AGENCY_REPOSITORY } from './application/ports/read-agency.repository';
 import { READ_AGENCY_ONBOARDING_REPOSITORY } from './application/ports/read-agency-onboarding.repository';
 import { READ_AGENCY_MEMBERSHIP_REPOSITORY } from './application/ports/read-agency-membership.repository';
+import { GetAgencyHandler } from './application/queries/get-agency/get-agency.handler';
 import { GetAgencyOnboardingHandler } from './application/queries/get-agency-onboarding/get-agency-onboarding.handler';
 import { ListMyAgenciesHandler } from './application/queries/list-my-agencies/list-my-agencies.handler';
 import { AgencyAuditSubscriber } from './application/subscribers/agency-audit.subscriber';
@@ -17,6 +21,7 @@ import { INVITATION_REPOSITORY } from './domain/ports/invitation.repository';
 import { AgencyTypeOrmRepository } from './infrastructure/persistence/typeorm/agency.typeorm.repository';
 import { AgencyTeamTypeOrmRepository } from './infrastructure/persistence/typeorm/agency-team.typeorm.repository';
 import { InvitationTypeOrmRepository } from './infrastructure/persistence/typeorm/invitation.typeorm.repository';
+import { ReadAgencyTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency.typeorm.repository';
 import { ReadAgencyOnboardingTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-onboarding.typeorm.repository';
 import { ReadAgencyMembershipTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-membership.typeorm.repository';
 import { AgencyController } from './presentation/http/agency.controller';
@@ -32,8 +37,12 @@ import { MyAgenciesController } from './presentation/http/my-agencies.controller
     { provide: AGENCY_TEAM_REPOSITORY, useClass: AgencyTeamTypeOrmRepository },
     { provide: INVITATION_REPOSITORY, useClass: InvitationTypeOrmRepository },
     { provide: READ_AGENCY_MEMBERSHIP_REPOSITORY, useClass: ReadAgencyMembershipTypeOrmRepository },
+    { provide: READ_AGENCY_REPOSITORY, useClass: ReadAgencyTypeOrmRepository },
     { provide: READ_AGENCY_ONBOARDING_REPOSITORY, useClass: ReadAgencyOnboardingTypeOrmRepository },
     CreateAgencyHandler,
+    UpdateAgencyIdentityHandler,
+    UpdateAgencyProfileHandler,
+    GetAgencyHandler,
     GetAgencyOnboardingHandler,
     ChangeMemberRoleHandler,
     RevokeMembershipHandler,

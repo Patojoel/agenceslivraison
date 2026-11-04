@@ -21,6 +21,10 @@ export class AuditLogOrmEntity {
   @Column({ name: 'subject_user_id', type: 'uuid', nullable: true })
   subjectUserId: string | null;
 
+  /** Safe metadata about the action, such as the names of the fields a person changed; never their values. */
+  @Column({ type: 'jsonb', nullable: true })
+  details: { fields: string[] } | null;
+
   @Column({ name: 'occurred_at', type: 'timestamptz', default: () => 'now()' })
   occurredAt: Date;
 }

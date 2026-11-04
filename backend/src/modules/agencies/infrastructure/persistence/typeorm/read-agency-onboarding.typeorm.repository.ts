@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { TypeOrmDatabaseConnection } from '@shared/infrastructure/persistence/typeorm/typeorm-database-connection';
 import { ReadAgencyOnboardingRepository } from '../../../application/ports/read-agency-onboarding.repository';
 import { AgencyOnboardingReadModel } from '../../../application/read-models/agency-onboarding.read-model';
-import { AGENCY_STATUSES, AgencyStatus } from '../../../domain/agency.snapshot';
+import { isAgencyStatus } from '../../../domain/agency.snapshot';
 import { AgencyMembershipOrmEntity } from './agency-membership.orm-entity';
 import { AgencyOrmEntity } from './agency.orm-entity';
 
@@ -15,8 +15,6 @@ interface OnboardingRow {
   headquartersAddress: boolean;
   primaryPhone: boolean;
 }
-
-const isAgencyStatus = (value: string): value is AgencyStatus => AGENCY_STATUSES.some(status => status === value);
 
 @Injectable()
 export class ReadAgencyOnboardingTypeOrmRepository implements ReadAgencyOnboardingRepository {

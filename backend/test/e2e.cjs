@@ -277,6 +277,154 @@ const { Client } = require('pg');
       await agencyPool.query("UPDATE agencies SET status = 'submitted', submitted_at = '2026-11-15T10:00:00Z', submitted_by = $2 WHERE id = $1", [created.agencyId, account.id]);
       const submitted = await (await getOnboarding(tokens.accessToken, created.agencyId)).json();
       assert.deepEqual([submitted.status, submitted.submission, submitted.readyForSubmission], ['submitted', { submittedAt: '2026-11-15T10:00:00.000Z', submittedBy: account.id }, false]);
+
+      // B2.2 and B2.6: read, identity, profile, optimistic version, rights, audit.
+      const authHeaders = (access) => (access ? { authorization: `Bearer ${access}` } : {});
+      const getAgency = (access, id) => fetch(`${api}/agencies/${id}`, { headers: authHeaders(access) });
+      const patchAgency = (route, access, body, ifMatch) => fetch(`${api}/agencies/${route}`, { method: 'PATCH', headers: { ...authHeaders(access), 'content-type': 'application/json', ...(ifMatch === undefined ? {} : { 'if-match': ifMatch }) }, body: JSON.stringify(body) });
+      const editable = (await (await postAgency(tokens.accessToken, { tradeName: 'Edition Express' })).json()).agencyId;
+      const adminUser = '00000000-0000-4000-8000-000000000012';
+      await agencyPool.query("INSERT INTO agency_memberships (id, agency_id, user_id, role, active) VALUES ($1, $2, $3, 'admin', true), ($4, $2, $5, 'agent', true), ($6, $2, $7, 'admin', false)", ['00000000-0000-4000-8000-000000000050', editable, adminUser, '00000000-0000-4000-8000-000000000051', invitedUser, '00000000-0000-4000-8000-000000000052', former]);
+      const outsiderOwn = (await (await postAgency(outsiderAccess, { tradeName: 'Agence Voisine' })).json()).agencyId;
+      const unknownAgency = '00000000-0000-4000-8000-0000000000fd';
+      const row = async () => (await agencyPool.query('SELECT * FROM agencies WHERE id = $1', [editable])).rows[0];
+      const edited = async () => (await agencyPool.query("SELECT action, user_id, details FROM identity_audit WHERE agency_id = $1 AND action IN ('agency.identity_updated', 'agency.profile_updated') ORDER BY occurred_at, id", [editable])).rows;
+
+      for (const [role, access] of [['owner', tokens.accessToken], ['admin', adminAccess], ['agent', invitedTokens.accessToken]]) {
+        const read = await getAgency(access, editable);
+        assert.equal(read.status, 200, `${role} reads the agency`);
+        assert.equal(read.headers.get('etag'), '"1"', `${role} gets the version as an ETag`);
+        assert.match(read.headers.get('cache-control'), /no-store/);
+        assert.deepEqual(await read.json(), { id: editable, status: 'draft', tradeName: 'Edition Express', description: null, version: 1, identity: { legalName: null, headquartersCity: null, headquartersAddress: null, primaryPhone: null, contactEmail: null, rccm: null, niu: null } });
+      }
+      const unknownRead = await getAgency(tokens.accessToken, unknownAgency);
+      assert.equal(unknownRead.status, 404);
+      const unknownBody = withoutEcho(await unknownRead.json());
+      for (const [who, access] of [['an outsider', outsiderAccess], ['a former member', formerAccess]]) {
+        const response = await getAgency(access, editable);
+        assert.equal(response.status, 404, `${who} cannot read`);
+        assert.deepEqual(withoutEcho(await response.json()), unknownBody, `${who} gets the answer of an unknown agency`);
+      }
+      assert.equal((await getAgency(outsiderAccess, editable)).status, 404, 'a member of another agency cannot read');
+      assert.equal((await getAgency(null, editable)).status, 401, 'anonymous read refused');
+      assert.equal((await getAgency(tokens.accessToken, 'not-a-uuid')).status, 400, 'invalid agency id');
+
+      const noPrecondition = await patchAgency(`${editable}/identity`, tokens.accessToken, { legalName: 'Express Douala SARL' });
+      assert.equal(noPrecondition.status, 428, 'If-Match is required');
+      assert.match(noPrecondition.headers.get('content-type'), /^application\/problem\+json/);
+      assert.equal((await patchAgency(`${editable}/profile`, tokens.accessToken, { description: 'Livraison' })).status, 428, 'If-Match is required for the profile too');
+      for (const malformed of ['abc', '"abc"', '0', '-1', '1.5', 'W/"1"', '"1", "2"', '*', '99999999999', '']) {
+        assert.equal((await patchAgency(`${editable}/identity`, tokens.accessToken, { legalName: 'Express Douala SARL' }, malformed)).status, 400, `If-Match ${JSON.stringify(malformed)} refused`);
+      }
+      assert.equal((await row()).version, 1, 'refused requests wrote nothing');
+
+      const firstEdit = await patchAgency(`${editable}/identity`, tokens.accessToken, { legalName: ' Express  Douala SARL ', headquartersCity: 'Douala' }, '"1"');
+      assert.equal(firstEdit.status, 200, 'the owner completes the identity');
+      assert.equal(firstEdit.headers.get('etag'), '"2"');
+      assert.match(firstEdit.headers.get('cache-control'), /no-store/);
+      assert.deepEqual(await firstEdit.json(), { version: 2, identity: { legalName: 'Express Douala SARL', headquartersCity: 'Douala', headquartersAddress: null, primaryPhone: null, contactEmail: null, rccm: null, niu: null } });
+      const secondEdit = await patchAgency(`${editable}/identity`, adminAccess, { primaryPhone: '6 77 12 34 56', headquartersAddress: 'Rue Joss, face pharmacie du Rond-point' }, '2');
+      assert.equal(secondEdit.status, 200, 'an administrator completes the identity, a bare version is accepted');
+      const secondBody = await secondEdit.json();
+      assert.deepEqual([secondBody.version, secondBody.identity.primaryPhone, secondBody.identity.legalName], [3, '+237677123456', 'Express Douala SARL'], 'partial update keeps the other fields');
+      assert.equal((await getAgency(invitedTokens.accessToken, editable)).headers.get('etag'), '"3"');
+      const afterIdentity = await (await getOnboarding(tokens.accessToken, editable)).json();
+      assert.deepEqual(afterIdentity.prerequisites.filter(item => item.filled).map(item => item.code), ['legal_name', 'headquarters_city', 'headquarters_address', 'primary_phone'], 'the four identity prerequisites are met');
+
+      const agentTries = [['identity', { legalName: 'Fotso SARL' }], ['profile', { description: 'Meilleure agence' }]];
+      for (const [route, body] of agentTries) assert.equal((await patchAgency(`${editable}/${route}`, invitedTokens.accessToken, body, '3')).status, 403, `an agent cannot edit the ${route}`);
+      const hiddenFrom = [['an outsider', outsiderAccess, editable], ['a former member', formerAccess, editable], ['a member of another agency', outsiderAccess, editable], ['anyone, on an unknown agency', tokens.accessToken, unknownAgency]];
+      let hiddenBody = null;
+      for (const [who, access, id] of hiddenFrom) {
+        for (const [route, body] of [['identity', { legalName: 'Autre SARL' }], ['profile', { description: 'Autre présentation' }]]) {
+          const response = await patchAgency(`${id}/${route}`, access, body, '3');
+          assert.equal(response.status, 404, `${who} finds no agency to edit (${route})`);
+          const problem = withoutEcho(await response.json());
+          hiddenBody = hiddenBody ?? problem;
+          assert.deepEqual(problem, hiddenBody, `${who}: same answer as an unknown agency (${route})`);
+        }
+      }
+      assert.equal((await patchAgency(`${outsiderOwn}/identity`, tokens.accessToken, { legalName: 'Autre SARL' }, '1')).status, 404, 'the owner of one agency cannot edit another');
+      assert.equal((await patchAgency(`${editable}/identity`, null, { legalName: 'Autre SARL' }, '3')).status, 401, 'anonymous edit refused');
+      assert.equal((await patchAgency(`${editable}/profile`, revokedAccess, { description: 'Autre' }, '3')).status, 401, 'revoked session cannot edit');
+      assert.equal((await patchAgency('not-a-uuid/identity', tokens.accessToken, { legalName: 'Autre SARL' }, '3')).status, 400, 'invalid agency id');
+      assert.deepEqual([(await row()).version, (await row()).legal_name], [3, 'Express Douala SARL'], 'refused edits wrote nothing');
+
+      const refusedIdentity = [
+        { status: 'approved' }, { legalName: 'Express Douala SARL', agencyId: outsiderOwn }, { version: 9 }, { tradeName: 'Autre Nom' }, { description: 'x' },
+        { primaryPhone: '677 12 34' }, { primaryPhone: '5 77 12 34 56' }, { primaryPhone: '+33 6 12 34 56 78' }, { primaryPhone: 677123456 },
+        { legalName: 'x' }, { legalName: 'x'.repeat(201) }, { legalName: null }, { legalName: 5 }, { legalName: 'Nom\u0000Nul' },
+        { headquartersCity: 'D' }, { headquartersAddress: 'Rue' }, { contactEmail: 'contact@' }, { rccm: 'RC' }, { niu: 'M0123456789A' }, { niu: 5 },
+      ];
+      for (const body of refusedIdentity) assert.equal((await patchAgency(`${editable}/identity`, tokens.accessToken, body, '3')).status, 400, `identity refused ${JSON.stringify(body).slice(0, 60)}`);
+      assert.equal((await patchAgency(`${editable}/identity`, tokens.accessToken, ['legalName'], '3')).status, 400, 'a list is not an identity');
+      const refusedProfile = [{ legalName: 'Autre SARL' }, { status: 'approved' }, { tradeName: '' }, { tradeName: 'A' }, { tradeName: 'x'.repeat(121) }, { tradeName: null }, { description: 'x'.repeat(1001) }, { description: 'a\u0000b' }, { description: 5 }, { primaryPhone: '677123456' }];
+      for (const body of refusedProfile) assert.equal((await patchAgency(`${editable}/profile`, tokens.accessToken, body, '3')).status, 400, `profile refused ${JSON.stringify(body).slice(0, 60)}`);
+      assert.deepEqual([(await row()).version, (await row()).legal_name], [3, 'Express Douala SARL'], 'invalid bodies wrote nothing');
+
+      const stale = await patchAgency(`${editable}/identity`, tokens.accessToken, { headquartersCity: 'Edéa' }, '2');
+      assert.equal(stale.status, 409, 'a stale version is a conflict');
+      assert.equal((await patchAgency(`${editable}/identity`, tokens.accessToken, { headquartersCity: 'Edéa' }, '4')).status, 409, 'a future version is a conflict too');
+      assert.equal((await patchAgency(`${editable}/profile`, adminAccess, { description: 'Ancienne présentation' }, '2')).status, 409, 'stale profile');
+      assert.deepEqual([(await row()).version, (await row()).headquarters_city, (await row()).description], [3, 'Douala', null], 'a conflict writes nothing');
+
+      const sameValues = await patchAgency(`${editable}/identity`, tokens.accessToken, { legalName: 'Express  Douala SARL', primaryPhone: '+237 677 12 34 56' }, '3');
+      assert.equal(sameValues.status, 200);
+      assert.equal((await sameValues.json()).version, 3, 'no real change: same version');
+      assert.equal((await patchAgency(`${editable}/identity`, tokens.accessToken, {}, '3')).status, 200, 'an empty change is accepted and does nothing');
+      assert.equal((await row()).version, 3);
+
+      const optional = await patchAgency(`${editable}/identity`, tokens.accessToken, { contactEmail: 'Contact@Express.cm', rccm: 'RC/DLA/2020/B/1234', niu: 'M012345678901A' }, '3');
+      assert.deepEqual([optional.status, (await optional.json()).identity.contactEmail], [200, 'contact@express.cm']);
+      const cleared = await patchAgency(`${editable}/identity`, tokens.accessToken, { contactEmail: null, rccm: '  ', niu: null }, '4');
+      assert.deepEqual((await cleared.json()).identity, { legalName: 'Express Douala SARL', headquartersCity: 'Douala', headquartersAddress: 'Rue Joss, face pharmacie du Rond-point', primaryPhone: '+237677123456', contactEmail: null, rccm: null, niu: null });
+      assert.deepEqual([(await row()).version, (await row()).contact_email, (await row()).rccm, (await row()).niu], [5, null, null, null]);
+
+      const profile = await patchAgency(`${editable}/profile`, adminAccess, { description: ' Livraison express dans Douala, 7j/7 ' }, '5');
+      assert.equal(profile.status, 200, 'an administrator edits the profile');
+      assert.equal(profile.headers.get('etag'), '"6"');
+      assert.deepEqual(await profile.json(), { version: 6, tradeName: 'Edition Express', description: 'Livraison express dans Douala, 7j/7' });
+      const renamed = await patchAgency(`${editable}/profile`, tokens.accessToken, { tradeName: 'Edition Express & Littoral' }, '6');
+      assert.deepEqual(await renamed.json(), { version: 7, tradeName: 'Edition Express & Littoral', description: 'Livraison express dans Douala, 7j/7' });
+      const markup = await patchAgency(`${editable}/profile`, tokens.accessToken, { description: '<b>gras</b> & <script>alert(1)</script>' }, '7');
+      assert.equal((await markup.json()).description, '<b>gras</b> & <script>alert(1)</script>', 'markup is stored as plain text');
+      assert.equal((await patchAgency(`${editable}/profile`, tokens.accessToken, { description: 'x'.repeat(1000) }, '8')).status, 200, 'a description of 1000 characters');
+      const emptied = await patchAgency(`${editable}/profile`, tokens.accessToken, { description: null }, '9');
+      assert.deepEqual(await emptied.json(), { version: 10, tradeName: 'Edition Express & Littoral', description: null });
+      assert.equal((await row()).description, null);
+
+      const [firstRace, secondRace] = await Promise.all([patchAgency(`${editable}/identity`, tokens.accessToken, { headquartersCity: 'Edéa' }, '10'), patchAgency(`${editable}/identity`, adminAccess, { headquartersCity: 'Kribi' }, '10')]);
+      assert.deepEqual([firstRace.status, secondRace.status].sort(), [200, 409], 'two identity edits on one version: one wins');
+      assert.equal((await row()).version, 11);
+      assert.equal((await row()).headquarters_city, firstRace.status === 200 ? 'Edéa' : 'Kribi', 'the winner is the one stored');
+      const mixed = await Promise.all([patchAgency(`${editable}/identity`, tokens.accessToken, { niu: 'M012345678901A' }, '11'), patchAgency(`${editable}/profile`, adminAccess, { description: 'Course' }, '11')]);
+      assert.deepEqual(mixed.map(response => response.status).sort(), [200, 409], 'an identity edit and a profile edit on one version: one wins');
+      const crowd = await Promise.all(Array.from({ length: 6 }, (_, index) => patchAgency(`${editable}/profile`, index % 2 ? tokens.accessToken : adminAccess, { description: `Foule ${index}` }, '12')));
+      assert.deepEqual(crowd.map(response => response.status).sort(), [200, 409, 409, 409, 409, 409], 'six profile edits on one version: exactly one wins');
+      assert.equal((await row()).version, 13, 'the version moved once per winner');
+
+      assert.equal((await patchAgency(`${created.agencyId}/identity`, tokens.accessToken, { legalName: 'Express Cameroun SARL' }, String((await (await getAgency(tokens.accessToken, created.agencyId)).json()).version))).status, 409, 'the identity of a submitted agency is locked');
+      const lockedRow = (await agencyPool.query('SELECT legal_name, status, version FROM agencies WHERE id = $1', [created.agencyId])).rows[0];
+      assert.deepEqual([lockedRow.legal_name, lockedRow.status], ['Tchoua Express SARL', 'submitted'], 'a locked identity is untouched');
+      const submittedProfile = await patchAgency(`${created.agencyId}/profile`, tokens.accessToken, { description: 'Livraison et stockage à Douala' }, String(lockedRow.version));
+      assert.equal(submittedProfile.status, 200, 'the profile of a submitted agency stays editable');
+      assert.deepEqual([(await getAgency(tokens.accessToken, created.agencyId).then(response => response.json())).status], ['submitted'], 'the status did not move');
+      await assert.rejects(agencyPool.query("UPDATE agencies SET primary_phone = '0677123456' WHERE id = $1", [editable]), /agencies_primary_phone_format/, 'the database refuses a malformed phone');
+      await assert.rejects(agencyPool.query("UPDATE agencies SET niu = 'short' WHERE id = $1", [editable]), /agencies_niu_format/, 'the database refuses a malformed NIU');
+
+      const trail = await edited();
+      assert.deepEqual(trail.slice(0, 6).map(entry => [entry.action, entry.user_id, entry.details]), [
+        ['agency.identity_updated', account.id, { fields: ['legalName', 'headquartersCity'] }],
+        ['agency.identity_updated', adminUser, { fields: ['headquartersAddress', 'primaryPhone'] }],
+        ['agency.identity_updated', account.id, { fields: ['contactEmail', 'rccm', 'niu'] }],
+        ['agency.identity_updated', account.id, { fields: ['contactEmail', 'rccm', 'niu'] }],
+        ['agency.profile_updated', adminUser, { fields: ['description'] }],
+        ['agency.profile_updated', account.id, { fields: ['tradeName'] }],
+      ], 'effective edits are audited with field names');
+      const serialized = JSON.stringify(trail);
+      for (const secret of ['+237677123456', 'Douala', 'Rue Joss', 'Livraison', 'express.cm', 'RC/DLA', 'M012345678901A', 'Edition']) assert.ok(!serialized.includes(secret), `the audit never holds "${secret}"`);
+      const editAudit = (await agencyPool.query("SELECT count(*) FILTER (WHERE action = 'agency.identity_updated')::int AS identity, count(*) FILTER (WHERE action = 'agency.profile_updated')::int AS profile FROM identity_audit WHERE agency_id = ANY($1)", [[editable, created.agencyId]])).rows[0];
+      assert.equal(editAudit.identity + editAudit.profile, 13, 'one audit row per effective edit, none for refusals and no-ops');
     } finally { await agencyPool.end(); }
     const me = (token) => fetch('http://127.0.0.1:3107/api/v1/me', { headers: { authorization: `Bearer ${token}` } });
     const profile = await me(tokens.accessToken);
@@ -305,7 +453,7 @@ const { Client } = require('pg');
       assert.equal(audit.rows[0].total, 1);
       const actions = await auditPool.query('SELECT action, count(*)::int AS total FROM identity_audit GROUP BY action ORDER BY action');
       assert.deepEqual(Object.fromEntries(actions.rows.map(row => [row.action, row.total])), {
-        'agency.created': 6, 'invitation.accepted': 2, 'invitation.created': 4, 'membership.removed': 1, 'membership.role_changed': 1,
+        'agency.created': 8, 'agency.identity_updated': 6, 'agency.profile_updated': 7, 'invitation.accepted': 2, 'invitation.created': 4, 'membership.removed': 1, 'membership.role_changed': 1,
         'session.login': 2, 'session.logout': 1, 'session.refresh': 1, 'user.registered': 1,
       }, 'every successful change is audited exactly once');
       const acceptedAudit = await auditPool.query("SELECT user_id, agency_id, subject_user_id FROM identity_audit WHERE action = 'invitation.accepted' AND agency_id = $1", [httpAgency]);
@@ -327,10 +475,10 @@ const { Client } = require('pg');
     assert.ok(spec.paths['/api/v1/auth/logout']);
     assert.ok(spec.paths['/api/v1/me']);
     assert.deepEqual(Object.keys(spec.paths).sort(), [
-      '/api/v1/agencies', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agency-invitations/accept',
+      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agency-invitations/accept',
       '/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/auth/refresh', '/api/v1/auth/register',
       '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies',
-    ], 'public route set unchanged');
+    ], 'public route set is the documented one');
     const { JWT_SECRET: _unused, ...unsignedEnv } = env;
     const unsigned = spawn(process.execPath, ['dist/main.js'], { env: { ...unsignedEnv, PORT: '3108' }, stdio: 'ignore' });
     try {
