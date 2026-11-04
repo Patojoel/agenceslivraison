@@ -120,7 +120,7 @@ Corps : mise à jour **partielle** ; un champ absent reste inchangé. Aucun autr
 | `headquartersCity` | oui | 2 à 80 caractères, texte libre |
 | `headquartersAddress` | oui | 5 à 300 caractères |
 | `primaryPhone` | oui | `+237` puis 9 chiffres commençant par 2 ou 6 ; les espaces sont tolérés et `+237` est facultatif à la saisie : `6 77 12 34 56` donne `+237677123456`. Les numéros étrangers sont refusés. |
-| `contactEmail` | non | adresse valide, passée en minuscules ; `null` ou texte vide pour l'effacer |
+| `contactEmail` | non | adresse valide (même contrôle qu'à l'inscription, 254 caractères au plus), passée en minuscules ; les caractères de contrôle et de format (NUL, BEL, marques bidi, espaces de largeur nulle) sont refusés avec un **400** ; `null` ou texte vide pour l'effacer |
 | `rccm` | non | 5 à 40 caractères ; `null` ou texte vide pour l'effacer |
 | `niu` | non | 14 caractères alphanumériques ; `null` ou texte vide pour l'effacer |
 
@@ -309,7 +309,7 @@ Configuration minimale (décision D-04) : **livraison** = au moins une zone acti
 | `agent` | oui | 403 |
 | non-membre, ancien membre, autre agence, agence inconnue | 404 | 404 (même réponse) |
 
-L'agence visée vient du chemin, jamais du corps. Chaque action effective écrit une trace d'audit dans la même transaction (`agency.zone_added`, `agency.zone_reactivated`, `agency.zone_retired`, `agency.site_created`, `agency.site_updated`, `agency.site_deactivated`, `agency.site_reactivated`, `agency.capability_enabled`, `agency.capability_suspended`), avec des **noms** de champs ou de capacités seulement (`details.fields`), jamais de villes, d'adresses, de téléphones ni de motifs. Un refus (conflit, droit, donnée invalide) et une modification sans effet réel n'écrivent rien.
+L'agence visée vient du chemin, jamais du corps. Chaque action effective écrit une trace d'audit dans la même transaction (`agency.zone_added`, `agency.zone_reactivated`, `agency.zone_retired`, `agency.site_created`, `agency.site_updated`, `agency.site_deactivated`, `agency.site_reactivated`, `agency.capability_enabled`, `agency.capability_suspended`), avec des **noms** de champs ou de capacités seulement (`details.fields`), jamais de villes, d'adresses, de téléphones ni de motifs. Les actions sur une zone ou un site portent aussi l'**identifiant** de la ressource touchée (colonne `resource_id`, opaque : ajout, retrait, réactivation d'une zone ; création, modification, désactivation, réactivation d'un site) ; les actions sans ressource gardent `resource_id` à `NULL`. Un refus (conflit, droit, donnée invalide) et une modification sans effet réel n'écrivent rien.
 
 ## Soumettre l'agence à vérification
 

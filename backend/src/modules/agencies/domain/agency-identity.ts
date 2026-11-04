@@ -73,13 +73,21 @@ function optional<T>(raw: string | null | undefined, of: (text: string) => T): T
   return raw === null || raw.trim() === '' ? null : of(raw);
 }
 
+/** Control (`Cc`) and format (`Cf`: NUL, BEL, ESC, bidi marks, zero-width) characters have no place in an address; PostgreSQL refuses NUL. */
+const UNSAFE_CHARACTER = /[\p{Cc}\p{Cf}]/u;
+
+function contactEmailOf(raw: string): Email {
+  if (UNSAFE_CHARACTER.test(raw)) throw new InvalidAgencyField('contactEmail');
+  return Email.of(raw);
+}
+
 export function identityChangeOf(raw: RawIdentityChange): IdentityChange {
   return {
     legalName: required(raw.legalName, 'legalName', LegalName.of),
     headquartersCity: required(raw.headquartersCity, 'headquartersCity', HeadquartersCity.of),
     headquartersAddress: required(raw.headquartersAddress, 'headquartersAddress', HeadquartersAddress.of),
     primaryPhone: required(raw.primaryPhone, 'primaryPhone', PrimaryPhone.of),
-    contactEmail: optional(raw.contactEmail, Email.of),
+    contactEmail: optional(raw.contactEmail, contactEmailOf),
     rccm: optional(raw.rccm, Rccm.of),
     niu: optional(raw.niu, Niu.of),
   };

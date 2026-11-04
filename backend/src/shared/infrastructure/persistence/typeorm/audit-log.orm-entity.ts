@@ -21,6 +21,10 @@ export class AuditLogOrmEntity {
   @Column({ name: 'subject_user_id', type: 'uuid', nullable: true })
   subjectUserId: string | null;
 
+  /** The resource the action touched (a zone, a site…), when there is one; an opaque identifier, no foreign key since the audit outlives any resource. */
+  @Column({ name: 'resource_id', type: 'uuid', nullable: true })
+  resourceId: string | null;
+
   /** Safe metadata about the action, such as the names of the fields a person changed; never their values. */
   @Column({ type: 'jsonb', nullable: true })
   details: { fields: string[] } | null;

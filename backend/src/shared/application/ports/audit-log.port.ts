@@ -10,6 +10,8 @@ export interface AuditEntry {
   readonly action: string;
   readonly agencyId?: string;
   readonly subjectUserId?: string;
+  /** Opaque identifier of the resource the action touched (a zone, a site…); never a value a person typed. */
+  readonly resourceId?: string;
   readonly details?: AuditDetails;
 }
 

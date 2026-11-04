@@ -15,17 +15,17 @@ function toAuditEntry(event: AgencyEvent): AuditEntry {
     case 'AgencySubmittedForVerification':
       return { userId: event.actorId, action: 'agency.submitted', agencyId: event.agencyId };
     case 'ServiceZoneAdded':
-      return { userId: event.actorId, action: event.reactivated ? 'agency.zone_reactivated' : 'agency.zone_added', agencyId: event.agencyId };
+      return { userId: event.actorId, action: event.reactivated ? 'agency.zone_reactivated' : 'agency.zone_added', agencyId: event.agencyId, resourceId: event.zoneId };
     case 'ServiceZoneRetired':
-      return { userId: event.actorId, action: 'agency.zone_retired', agencyId: event.agencyId };
+      return { userId: event.actorId, action: 'agency.zone_retired', agencyId: event.agencyId, resourceId: event.zoneId };
     case 'AgencySiteCreated':
-      return { userId: event.actorId, action: 'agency.site_created', agencyId: event.agencyId };
+      return { userId: event.actorId, action: 'agency.site_created', agencyId: event.agencyId, resourceId: event.siteId };
     case 'AgencySiteUpdated':
-      return { userId: event.actorId, action: 'agency.site_updated', agencyId: event.agencyId, details: { fields: event.fields } };
+      return { userId: event.actorId, action: 'agency.site_updated', agencyId: event.agencyId, resourceId: event.siteId, details: { fields: event.fields } };
     case 'AgencySiteDeactivated':
-      return { userId: event.actorId, action: 'agency.site_deactivated', agencyId: event.agencyId };
+      return { userId: event.actorId, action: 'agency.site_deactivated', agencyId: event.agencyId, resourceId: event.siteId };
     case 'AgencySiteReactivated':
-      return { userId: event.actorId, action: 'agency.site_reactivated', agencyId: event.agencyId };
+      return { userId: event.actorId, action: 'agency.site_reactivated', agencyId: event.agencyId, resourceId: event.siteId };
     case 'AgencyCapabilityEnabled':
       return { userId: event.actorId, action: 'agency.capability_enabled', agencyId: event.agencyId, details: { fields: [event.capability] } };
     case 'AgencyCapabilitySuspended':

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Email, InvalidEmail } from '@shared/domain/value-objects/email';
+import { identityChangeOf } from '../../domain/agency-identity';
 import { InvalidAgencyField } from '../../domain/exceptions/agency.exceptions';
 import { Description } from '../../domain/value-objects/description';
 import { HeadquartersAddress } from '../../domain/value-objects/headquarters-address';
@@ -108,4 +109,17 @@ test('description: blank text is not a description', () => {
 
 test('trade name refuses control characters instead of failing in the database', () => {
   assert.throws(() => TradeName.of('Express\u0000Douala'), Error);
+});
+
+test('the contact e-mail of an identity change refuses control and format characters, with an invalid error', () => {
+  for (const raw of ['a\u0000@b.cm', 'a\u0007@b.cm', 'a\u001b@b.cm', 'a\u202E@b.cm', 'a\u200B@b.cm', 'a@b\u007F.cm']) {
+    assert.throws(() => identityChangeOf({ contactEmail: raw }), (error: unknown) => error instanceof InvalidAgencyField && error.kind === 'invalid' && error.field === 'contactEmail', JSON.stringify(raw));
+  }
+});
+
+test('a valid contact e-mail passes, is normalized, and can still be cleared', () => {
+  assert.equal(identityChangeOf({ contactEmail: ' Contact@Express.cm ' }).contactEmail?.value, 'contact@express.cm');
+  assert.equal(identityChangeOf({ contactEmail: null }).contactEmail, null);
+  assert.equal(identityChangeOf({ contactEmail: '  ' }).contactEmail, null);
+  assert.equal(identityChangeOf({}).contactEmail, undefined);
 });

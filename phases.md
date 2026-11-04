@@ -113,6 +113,10 @@ Chaque phase B suit ces étapes ; elles sont cochées par lot dans `progress.md`
   - B2.7 UC-02-07 Suspendre une capacité (bloque les nouvelles demandes, garde l'historique — RM-02-03).
   - B2.8 UC-02-08 Gérer les sites (`AgencyLocation`) : créer, modifier, désactiver.
   - B2.9 Consulter l'état d'onboarding — `GET /agencies/{id}/onboarding`.
+  - B2.11 *(ajoutée le 2026-11-04, revue sécurité)* `contactEmail` : refus des caractères de contrôle, format validé comme en B1.
+  - B2.12 *(ajoutée le 2026-11-04, revue sécurité)* Audit des zones et sites avec l'identifiant de la ressource touchée.
+  - B2.14 *(ajoutée le 2026-11-04, D-20)* `GET /agencies/{id}` (identité complète) réservée au propriétaire et à l'administrateur ; l'agent reçoit 403.
+  - B2.13 *(ajoutée le 2026-11-04, revue sécurité, durcissement)* Agrégat `Agency` borné (plafonds, chargement des données actives) ; membership vérifié avant le verrou.
   - B2.10 *(ajoutée le 2026-11-04, anomalie A-09 des use cases)* Lister les membres d'une agence — `GET /agencies/{id}/members` (curseur, membres actifs de l'agence de l'appelant uniquement) ; nécessaire à F1.3.
 - **Règles** : RM-02-01 agence non approuvée peut rester brouillon ; RM-02-02 capacité = configuration minimale ; RM-02-03 suspension sans effacement ; RM-02-04 vérification ≠ assurance.
 - **Événements** : `AgencyRegistered`, `AgencyCapabilityEnabled` (+ audit).

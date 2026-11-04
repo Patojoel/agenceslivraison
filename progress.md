@@ -18,10 +18,10 @@ Tableau de bord vivant du projet. Le détail de chaque tâche (règles, endpoint
 
 | Élément | Valeur |
 |---|---|
-| Lot backend courant | B2 — Onboarding agence (10/10 tâches faites ; S9 revue sécurité en cours) |
+| Lot backend courant | B2 — Onboarding agence (B2.11–B2.12 faites ; B2.14 en cours, puis contre-revue et clôture) |
 | Branche | `refactor/architecture-normalisee` |
 | Mode de session | light (session du 2026-11-03) |
-| Tâches en cours | `[~]` B2.S9 — revue `security-reviewer` du lot B2 (commits `7a2cf3f`…tranche 4) |
+| Tâches en cours | `[~]` B2.14 — `GET /agencies/{id}` réservée au propriétaire et à l'administrateur (D-20, `back-builder`) |
 
 ### Refactor architecture + TypeORM — commité (2026-11-03)
 Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranchée en faveur de TypeORM et de l'architecture normalisée. `CLAUDE.md`, les agents (`back-builder`, `archi-reviewer`, `query-perf`), `phases.md` et `backend/docs/` sont alignés. Décision et conventions : [docs/architecture/](docs/architecture/).
@@ -34,7 +34,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 |---|---|---|---|
 | B0 | Socle technique | terminé (sauvegarde à valider en cible) | 11/12 |
 | B1 | Identité, sessions, memberships | terminé, re-vérifié après refactor (rate limit partagé et constats de revue B1.13–B1.14 à traiter) | 11/14 |
-| B2 | Onboarding agence | 4 tranches faites ; revue sécurité (S9) et clôture (S10) en cours | 10/10 |
+| B2 | Onboarding agence | revue faite, corrections B2.11–B2.12 faites ; B2.14 (D-20) puis clôture ; B2.13 durcissement | 12/14 |
 | B3 | Tarifs, zones, marketplace publique | à faire | 0/13 |
 | B4 | Clients, commerçants, demandes | à faire | 0/14 |
 | B5 | Commandes, colis, suivi | à faire | 0/17 |
@@ -93,7 +93,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 > État B0/B1 relevé dans `backend/docs/` et le code au 2026-11-03, puis re-vérifié après le refactor `293a35b` : tous les parcours B1 sont couverts par `test/e2e.cjs`, passé dans Docker le 2026-11-03.
 
 ### B2 — Onboarding agence (CRITIQUE)
-Étapes : [x] S1 use cases (9 UC, 111 scénarios, 112 tests prévus) · [x] S2 plan validé (2026-11-04, 4 tranches : 1) B2.1+B2.9, 2) B2.2+B2.6, 3) B2.3+B2.8+B2.4+B2.7, 4) B2.5+B2.10) · [x] S3 domaine · [x] S4 application · [x] S5 persistance · [x] S6 HTTP · [x] S7 E2E · [x] S8 docs · [~] S9 revues · [ ] S10 clôture
+Étapes : [x] S1 use cases (9 UC, 111 scénarios, 112 tests prévus) · [x] S2 plan validé (2026-11-04, 4 tranches : 1) B2.1+B2.9, 2) B2.2+B2.6, 3) B2.3+B2.8+B2.4+B2.7, 4) B2.5+B2.10) · [x] S3 domaine · [x] S4 application · [x] S5 persistance · [x] S6 HTTP · [x] S7 E2E · [x] S8 docs · [x] S9 revues (`security-reviewer` 2026-11-04 : aucun critique ; 2 à corriger → B2.11, B2.12 ; durcissements → B2.13, B3.9 ; pas d'`archi-reviewer`, mode light) · [ ] S10 clôture
 - [x] B2.1 Créer brouillon + premier propriétaire — `POST /agencies`, agence + équipe dans une transaction, `Idempotency-Key` (rejeu, conflit, concurrence testés)
 - [x] B2.2 Compléter l'identité — `PATCH /agencies/{id}/identity` (brouillon seulement, `If-Match`, 428 / 409) ; lecture ajoutée hors plan : `GET /agencies/{id}` (version, `ETag`)
 - [x] B2.3 Zones desservies — `POST|DELETE|GET /agencies/{id}/zones` (retrait logique, réactivation avec le même id, 100 actives max, table `service_zones` réutilisable par B3 via `(agency_id, id)` — D-15)
@@ -104,6 +104,10 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [x] B2.8 Gérer les sites — création, modification (`If-Match` sur la version du site), désactivation, réactivation, liste
 - [x] B2.9 État d'onboarding — `GET /agencies/{id}/onboarding`, 404 uniforme hors membres actifs ; capacités, `hybrid`, zones et sites actifs réels depuis la tranche 3
 - [x] B2.10 *(ajoutée le 2026-11-04, anomalie A-09)* Lister les membres d'une agence — `GET /agencies/{id}/members` (curseur, tout membre actif, sans e-mail : voir D-18)
+- [x] B2.11 *(revue sécurité, à corriger)* `contactEmail` : validation Zod alignée sur B1 (`trim().email()`, `''` et `null` effacent) et défense du domaine (`p{Cc}`, `p{Cf}` refusés) ; NUL, BEL, U+202E : 400 au lieu de 500 ; `Email` partagé inchangé
+- [x] B2.12 *(revue sécurité, à corriger)* audit des zones et sites : colonne `identity_audit.resource_id` (migration `1793785151369-audit-resource-id`), renseignée pour les 6 actions zone et site, `NULL` ailleurs
+- [ ] B2.14 *(ajoutée le 2026-11-04, D-20)* `GET /agencies/{id}` (identité complète) réservée au propriétaire et à l'administrateur : l'agent reçoit 403 ; il garde l'état d'onboarding, les zones, les sites et la liste des membres
+- [ ] B2.13 *(revue sécurité, durcissement)* borner l'agrégat `Agency` (plafond de sites et de zones totales, chargement des seules données actives) ; vérifier le membership avant de poser `FOR UPDATE` (contention par un étranger)
 
 ### B3 — Tarifs, zones, marketplace publique (CRITIQUE)
 Étapes : [ ] S1 · [ ] S2 · [ ] S3 · [ ] S4 · [ ] S5 · [ ] S6 · [ ] S7 · [ ] S8 · [ ] S9 · [ ] S10
@@ -115,7 +119,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [ ] B3.6 Simuler prix
 - [ ] B3.7 Émettre devis
 - [ ] B3.8 Accepter devis
-- [ ] B3.9 Publier fiche publique (échapper la description à l'affichage : le HTML y est conservé comme texte depuis B2.6)
+- [ ] B3.9 Publier fiche publique (échapper la description à l'affichage, le HTML y est conservé comme texte depuis B2.6 ; refuser `p{Cf}` (bidi, largeur nulle) dans les noms publiables ; ne pas publier les agences au nom provisoire de migration ; ne publier que les agences approuvées — D-05)
 - [ ] B3.10 Rechercher (`GET /public/agencies`)
 - [ ] B3.11 Filtrer zone / capacité
 - [ ] B3.12 Consulter fiche (`/public/agencies/{slug}`)
@@ -346,15 +350,17 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | D-07 | Statuts et transitions des commandes et colis ; contenu et durée du suivi public | B5 | ouverte |
 | D-08 | Preuves de livraison acceptées et conservation ; géolocalisation ; stockage des fichiers | B6, M1.6 | ouverte |
 | D-09 | Responsabilité inter-agences, SLA, politique d'écart et de retours | B8, B9 | ouverte |
-| D-10 | Responsables de validation et critères de certification des agences | B10 | ouverte |
+| D-10 | Responsables de validation et critères de certification des agences ; réexamen si le nom commercial change après approbation ; RCCM et NIU auto-déclarés | B10 | ouverte |
 | D-11 | Rétention et calendrier des sauvegardes | B0.11, B10.20 | ouverte |
+| D-21 | Quota de brouillons d'agence par utilisateur | B2.1, B10.19 | ouverte |
 | D-18 | E-mail (ou libellé lisible) des membres pour l'écran équipe F1.3 : capacité de lecture exposée par `identity` (résolution par lot des `userId`) ? Donnée personnelle, périmètre critique | F1.3 | ouverte |
-| D-19 | Soumission : exiger au moins un site actif même pour une agence livraison seule (règle RG-02-05-02 du use case, implémentée) ou seulement la configuration de chaque capacité active ? | B2.5 | à confirmer |
-| D-17 | Configuration minimale absente à l'activation d'une capacité : 400 `CAPABILITY_PREREQUISITE_MISSING` avec `missing` (choix du use case UC-02-04, implémenté) ou 409 ? Historique des motifs de suspension lisible ailleurs que dans l'état d'onboarding ? | B2.4, B2.7 | à confirmer |
 | D-16 | Rétention des clés d'idempotence (`idempotency_keys`) | B10.21 | ouverte |
 | D-12 | Détecter une migration TypeORM modifiée après application (empreinte par migration) ; afficher ou non au migrateur le motif d'un refus d'adoption Drizzle (message sans donnée) | B10.18 | ouverte |
 
 Décisions prises :
+- 2026-11-04 — **D-20** : seuls le propriétaire et l'administrateur lisent l'identité complète de l'agence (`GET /agencies/{id}` : téléphone, e-mail, RCCM, NIU) ; l'agent reçoit 403 et garde l'état d'onboarding, les zones, les sites et la liste des membres (tâche B2.14).
+- 2026-11-04 — **D-17** : configuration minimale absente à l'activation d'une capacité → 400 `CAPABILITY_PREREQUISITE_MISSING` avec `missing` (comme la soumission incomplète, 400 `SUBMISSION_INCOMPLETE`) ; seul le dernier motif de suspension est exposé.
+- 2026-11-04 — **D-19** : toute agence doit avoir au moins un site actif pour être soumise, quelles que soient ses capacités (RG-02-05-02).
 - 2026-11-04 — **Plan B2 (S2)** validé : agrégat unique `Agency` (identité, profil, capacités, zones, sites) sous le verrou de la ligne `agencies` ; droits via `AgencyTeam` ; création = agence + équipe dans une transaction (exception documentée) ; table `idempotency_keys` partagée ; version par `If-Match` ; routes d'action (`/identity`, `/profile`, `/capabilities/{type}/activate|suspend`, `/submit`) ; B2.10 inclus (liste des membres, tout membre actif). Questions mineures : défauts des use cases (pas d'abandon de brouillon, `AgencyRegistered` à la création, 100 zones actives max, motif de suspension 3–500 caractères, site sans GPS, pas d'audit des lectures).
 - 2026-11-04 — **D-04** (hypothèses par défaut des use cases) : pour soumettre, raison sociale, ville et adresse du siège, téléphone `+237` + 9 chiffres (2 ou 6) ; e-mail, RCCM, NIU facultatifs ; aucun document en B2 (justificatifs en B10) ; livraison active = au moins une zone active, stockage actif = au moins un site actif ; après soumission, identité verrouillée, profil, zones, capacités et sites modifiables, pas de retrait ; statuts suivants (approuvée, rejetée, suspendue) décidés en B10.
 - 2026-11-04 — **D-13** : propriétaire et administrateur configurent l'agence ; seul le propriétaire la soumet ; l'agent consulte.
@@ -369,6 +375,10 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-04 | user + session principale | Décision D-20 | Identité complète réservée au propriétaire et à l'administrateur ; tâche B2.14 ajoutée (plan modifié, `phases.md` mis à jour) | aucune |
+| 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2.11 + B2.12 — corrections de la revue sécurité | Vert ; rouges constatés en unitaire et en E2E (`500 !== 400`) ; migration `1793785151369-audit-resource-id` | `npm run lint` OK · `npm run typecheck` OK · `npm test` 219/219 (relancé par la session principale) · `npm run build` OK · `migration:check` « No changes » · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
+| 2026-11-04 | `security-reviewer` (mode light, rapport appliqué par la session principale) | B2.S9 — revue sécurité du lot B2 (`7a2cf3f`…`43e4f99`) | Aucun critique ; isolation, droits D-13, idempotence, concurrence, SQL et migrations jugés sains ; 2 à corriger (B2.11 `contactEmail` NUL → 500, B2.12 audit sans ressource) ; 6 durcissements (B2.13, notes B3.9, B10.18) ; D-20 et D-21 ouvertes | `git diff 8725e8b 43e4f99 -- backend`, lecture du code, des migrations et de `test/e2e.cjs` ; aucun test relancé |
+| 2026-11-04 | user + session principale | Décisions D-17 et D-19 | Comportements implémentés confirmés (400 sur configuration minimale absente ; site actif exigé pour soumettre) ; aucun changement de code | aucune |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2 tranche 4 — B2.5 + B2.10 | Vert ; 2 routes (`submit`, `members`), aucune migration ; rouges constatés en unitaire et en E2E ; concurrence testée (double soumission, soumission contre édition d'identité) ; critère de sortie B2 vérifié en E2E (brouillon → soumise, validations, isolation) ; D-18 et D-19 ouvertes | `npm run lint` OK · `npm run typecheck` OK · `npm test` 217/217 (relancé par la session principale) · `npm run build` OK · `migration:check` « No changes » · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2 tranche 3 — B2.3 + B2.8 + B2.4 + B2.7 | Vert ; 10 routes (zones ×3, sites ×5, capacités ×2), état d'onboarding enrichi sans changement de contrat ; migration `1793783458220-agency-zones-sites-capabilities` (3 tables, index uniques partiels, 17 CHECK, clé de séquence des capacités) ; D-15 appliquée ; `DomainException` étendue (`code`, `missing`) ; rouges constatés en unitaire et en E2E ; concurrence testée (double activation, double suspension, doublons, dernière zone / dernier site) ; assertion d'audit de la tranche 2 rendue indépendante du gagnant d'une course ; D-17 ouverte | `npm run lint` OK · `npm run typecheck` OK · `npm test` 200/200 (relancé par la session principale) · `npm run build` OK · `migration:check` « No changes » · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2 tranche 2 — B2.2 + B2.6 | Vert ; 3 routes (`GET /agencies/{id}` ajoutée hors plan, `PATCH …/identity`, `PATCH …/profile`) ; migration `1793781805488-agency-identity-and-profile` (colonnes d'identité, 8 CHECK, `identity_audit.details` avec noms de champs uniquement) ; `If-Match` (428 absent, 400 mal formé, 409 périmé) ; rouges constatés en unitaire **et** en E2E (E2E écrite avant la présentation) ; `TradeName` refuse désormais les caractères de contrôle (NUL : 500 → 400) | `npm run lint` OK · `npm run typecheck` OK · `npm test` 128/128 (relancé par la session principale) · `npm run build` OK · `migration:check` « No changes » · E2E Docker exit 0 · `npm audit --omit=dev` 0 |

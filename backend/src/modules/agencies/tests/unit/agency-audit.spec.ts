@@ -61,14 +61,16 @@ test('zone, site and capability events are audited by action, with names or type
   for (const event of events) await subscriber.handle(event);
   const agencyId = uuid(10);
   const userId = uuid(2);
+  const resourceOfZone = uuid(501);
+  const resourceOfSite = uuid(601);
   assert.deepEqual(audit.entries, [
-    { userId, action: 'agency.zone_added', agencyId },
-    { userId, action: 'agency.zone_reactivated', agencyId },
-    { userId, action: 'agency.zone_retired', agencyId },
-    { userId, action: 'agency.site_created', agencyId },
-    { userId, action: 'agency.site_updated', agencyId, details: { fields: ['address', 'phone'] } },
-    { userId, action: 'agency.site_deactivated', agencyId },
-    { userId, action: 'agency.site_reactivated', agencyId },
+    { userId, action: 'agency.zone_added', agencyId, resourceId: resourceOfZone },
+    { userId, action: 'agency.zone_reactivated', agencyId, resourceId: resourceOfZone },
+    { userId, action: 'agency.zone_retired', agencyId, resourceId: resourceOfZone },
+    { userId, action: 'agency.site_created', agencyId, resourceId: resourceOfSite },
+    { userId, action: 'agency.site_updated', agencyId, resourceId: resourceOfSite, details: { fields: ['address', 'phone'] } },
+    { userId, action: 'agency.site_deactivated', agencyId, resourceId: resourceOfSite },
+    { userId, action: 'agency.site_reactivated', agencyId, resourceId: resourceOfSite },
     { userId, action: 'agency.capability_enabled', agencyId, details: { fields: ['delivery'] } },
     { userId, action: 'agency.capability_suspended', agencyId, details: { fields: ['storage'] } },
   ]);

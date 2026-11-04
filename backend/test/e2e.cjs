@@ -354,13 +354,16 @@ const { Client } = require('pg');
         { status: 'approved' }, { legalName: 'Express Douala SARL', agencyId: outsiderOwn }, { version: 9 }, { tradeName: 'Autre Nom' }, { description: 'x' },
         { primaryPhone: '677 12 34' }, { primaryPhone: '5 77 12 34 56' }, { primaryPhone: '+33 6 12 34 56 78' }, { primaryPhone: 677123456 },
         { legalName: 'x' }, { legalName: 'x'.repeat(201) }, { legalName: null }, { legalName: 5 }, { legalName: 'Nom\u0000Nul' },
-        { headquartersCity: 'D' }, { headquartersAddress: 'Rue' }, { contactEmail: 'contact@' }, { rccm: 'RC' }, { niu: 'M0123456789A' }, { niu: 5 },
+        { headquartersCity: 'D' }, { headquartersAddress: 'Rue' }, { contactEmail: 'contact@' }, { contactEmail: 'a\u0000b@c.cm' }, { contactEmail: 'a\u0007@b.cm' }, { contactEmail: 'a\u202E@b.cm' }, { rccm: 'RC' }, { niu: 'M0123456789A' }, { niu: 5 },
       ];
       for (const body of refusedIdentity) assert.equal((await patchAgency(`${editable}/identity`, tokens.accessToken, body, '3')).status, 400, `identity refused ${JSON.stringify(body).slice(0, 60)}`);
       assert.equal((await patchAgency(`${editable}/identity`, tokens.accessToken, ['legalName'], '3')).status, 400, 'a list is not an identity');
       const refusedProfile = [{ legalName: 'Autre SARL' }, { status: 'approved' }, { tradeName: '' }, { tradeName: 'A' }, { tradeName: 'x'.repeat(121) }, { tradeName: null }, { description: 'x'.repeat(1001) }, { description: 'a\u0000b' }, { description: 5 }, { primaryPhone: '677123456' }];
       for (const body of refusedProfile) assert.equal((await patchAgency(`${editable}/profile`, tokens.accessToken, body, '3')).status, 400, `profile refused ${JSON.stringify(body).slice(0, 60)}`);
-      assert.deepEqual([(await row()).version, (await row()).legal_name], [3, 'Express Douala SARL'], 'invalid bodies wrote nothing');
+      assert.deepEqual([(await row()).version, (await row()).legal_name, (await row()).contact_email], [3, 'Express Douala SARL', null], 'invalid bodies wrote nothing');
+      const controlEmail = await patchAgency(`${editable}/identity`, tokens.accessToken, { contactEmail: 'a\u0000b@c.cm' }, '3');
+      assert.equal(controlEmail.status, 400, 'a control character in the contact e-mail is a 400, not a 500');
+      assert.ok(controlEmail.headers.get('content-type').startsWith('application/problem+json'));
 
       const stale = await patchAgency(`${editable}/identity`, tokens.accessToken, { headquartersCity: 'Edéa' }, '2');
       assert.equal(stale.status, 409, 'a stale version is a conflict');
@@ -467,7 +470,7 @@ const { Client } = require('pg');
       };
       let activeOne = null;
       const zoneRows = async (agency) => (await agencyPool.query('SELECT id, city, district, retired_at FROM service_zones WHERE agency_id = $1 ORDER BY city_key, district_key', [agency])).rows;
-      const configAudit = async (agency) => (await agencyPool.query("SELECT action, user_id, details FROM identity_audit WHERE agency_id = $1 AND action ~ '^agency\\.(zone|site|capability)_' ORDER BY occurred_at, id", [agency])).rows;
+      const configAudit = async (agency) => (await agencyPool.query("SELECT action, user_id, details, resource_id FROM identity_audit WHERE agency_id = $1 AND action ~ '^agency\\.(zone|site|capability)_' ORDER BY occurred_at, id", [agency])).rows;
 
       // Zones
       const zonesAgency = await configAgency();
@@ -969,7 +972,16 @@ const { Client } = require('pg');
       assert.equal(zoneTrail.filter(action => action === 'agency.zone_added').length, 6, 'every accepted zone is audited once');
       assert.equal(zoneTrail.filter(action => action === 'agency.zone_retired').length, 1);
       assert.equal(zoneTrail.filter(action => action === 'agency.zone_reactivated').length, 1);
-      const siteTrail = (await configAudit(sitesAgency)).map(entry => entry.action);
+      const zoneEntries = await configAudit(zonesAgency);
+      assert.deepEqual(zoneEntries.filter(entry => entry.action === 'agency.zone_retired').map(entry => entry.resource_id), [akwa.id], 'the retirement names the zone it retired');
+      const zoneIds = (await zoneRows(zonesAgency)).map(zone => zone.id);
+      assert.ok(zoneEntries.every(entry => zoneIds.includes(entry.resource_id)), 'every zone action names a zone of the agency');
+      const siteEntries = await configAudit(sitesAgency);
+      assert.deepEqual(siteEntries.filter(entry => entry.action === 'agency.site_deactivated').map(entry => entry.resource_id).sort(), [depot.id, removedTwin].sort(), 'each deactivation names its site');
+      const siteIds = (await agencyPool.query('SELECT id FROM agency_sites WHERE agency_id = $1', [sitesAgency])).rows.map(site => site.id);
+      assert.ok(siteEntries.every(entry => siteIds.includes(entry.resource_id)), 'every site action names a site of the agency');
+      assert.ok(trail.filter(entry => entry.action.startsWith('agency.capability_')).every(entry => entry.resource_id === null), 'capability actions have no resource');
+      const siteTrail = siteEntries.map(entry => entry.action);
       assert.deepEqual(['agency.site_created', 'agency.site_updated', 'agency.site_deactivated', 'agency.site_reactivated'].map(action => siteTrail.filter(item => item === action).length), [5, 2, 2, 1], 'creations, updates, deactivations and reactivations of the sites agency');
       }
     } finally { await agencyPool.end(); }
