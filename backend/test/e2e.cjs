@@ -425,6 +425,407 @@ const { Client } = require('pg');
       for (const secret of ['+237677123456', 'Douala', 'Rue Joss', 'Livraison', 'express.cm', 'RC/DLA', 'M012345678901A', 'Edition']) assert.ok(!serialized.includes(secret), `the audit never holds "${secret}"`);
       const editAudit = (await agencyPool.query("SELECT count(*) FILTER (WHERE action = 'agency.identity_updated')::int AS identity, count(*) FILTER (WHERE action = 'agency.profile_updated')::int AS profile FROM identity_audit WHERE agency_id = ANY($1)", [[editable, created.agencyId]])).rows[0];
       assert.equal(editAudit.identity + editAudit.profile, 13, 'one audit row per effective edit, none for refusals and no-ops');
+
+      {
+      // B2.3, B2.8, B2.4 and B2.7: served zones, sites and capabilities.
+      const { randomUUID } = require('node:crypto');
+      const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+      const configured = [];
+      const configAgency = async () => {
+        const id = randomUUID();
+        await agencyPool.query("INSERT INTO agencies (id, trade_name, created_by) VALUES ($1, 'Configuration Express', $2)", [id, account.id]);
+        for (const [user, role, active] of [[account.id, 'owner', true], [adminUser, 'admin', true], [invitedUser, 'agent', true], [former, 'admin', false]]) {
+          await agencyPool.query('INSERT INTO agency_memberships (id, agency_id, user_id, role, active) VALUES ($1, $2, $3, $4, $5)', [randomUUID(), id, user, role, active]);
+        }
+        configured.push(id);
+        return id;
+      };
+      const act = (method, path, access, body, headers = {}) => fetch(`${api}/agencies/${path}`, { method, headers: { ...authHeaders(access), ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const ownerAccess = tokens.accessToken;
+      const agentAccess = invitedTokens.accessToken;
+      const writers = [['owner', ownerAccess], ['admin', adminAccess]];
+      const problemOf = async (response, status, code, message) => {
+        assert.equal(response.status, status, message);
+        assert.match(response.headers.get('content-type'), /^application\/problem\+json/, message);
+        const problem = await response.json();
+        if (code !== undefined) assert.equal(problem.code, code, message);
+        return problem;
+      };
+      /** Every way of not being allowed to see the agency gives the answer of an unknown agency. */
+      const assertHidden = async (target, method, pathOf, body, headers) => {
+        const unknown = await act(method, pathOf(unknownAgency), ownerAccess, body, headers);
+        assert.equal(unknown.status, 404, `${target}: unknown agency`);
+        const expected = withoutEcho(await unknown.json());
+        for (const [who, access, agency] of [['an outsider', outsiderAccess, activeOne], ['a former member', formerAccess, activeOne], ['the owner of another agency', ownerAccess, outsiderOwn]]) {
+          const response = await act(method, pathOf(agency), access, body, headers);
+          assert.equal(response.status, 404, `${target}: ${who} finds nothing`);
+          assert.deepEqual(withoutEcho(await response.json()), expected, `${target}: ${who} gets the answer of an unknown agency`);
+        }
+        assert.equal((await act(method, pathOf(activeOne), null, body, headers)).status, 401, `${target}: anonymous`);
+        assert.equal((await act(method, pathOf(activeOne), revokedAccess, body, headers)).status, 401, `${target}: revoked session`);
+        assert.equal((await act(method, pathOf('not-a-uuid'), ownerAccess, body, headers)).status, 400, `${target}: invalid agency id`);
+      };
+      let activeOne = null;
+      const zoneRows = async (agency) => (await agencyPool.query('SELECT id, city, district, retired_at FROM service_zones WHERE agency_id = $1 ORDER BY city_key, district_key', [agency])).rows;
+      const configAudit = async (agency) => (await agencyPool.query("SELECT action, user_id, details FROM identity_audit WHERE agency_id = $1 AND action ~ '^agency\\.(zone|site|capability)_' ORDER BY occurred_at, id", [agency])).rows;
+
+      // Zones
+      const zonesAgency = await configAgency();
+      activeOne = zonesAgency;
+      const addZone = (agency, access, body) => act('POST', `${agency}/zones`, access, body);
+      const akwaZone = await addZone(zonesAgency, ownerAccess, { city: ' Douala ', district: 'Akwa' });
+      assert.equal(akwaZone.status, 201, 'the owner adds a zone');
+      assert.match(akwaZone.headers.get('cache-control'), /no-store/);
+      const akwa = await akwaZone.json();
+      assert.match(akwa.id, UUID);
+      assert.deepEqual([akwa.city, akwa.district, akwa.status, akwa.retiredAt], ['Douala', 'Akwa', 'active', null]);
+      assert.ok(Number.isFinite(Date.parse(akwa.addedAt)));
+      const wholeCity = await addZone(zonesAgency, adminAccess, { city: 'Yaoundé' });
+      assert.equal(wholeCity.status, 201, 'an administrator adds a whole city');
+      assert.equal((await wholeCity.json()).district, null);
+      assert.equal((await addZone(zonesAgency, ownerAccess, { city: 'Kribi', district: null })).status, 201, 'a null district means the whole city');
+      for (const [city, district] of [['Douala', 'Akwa'], ['douala', 'AKWA'], ['Douala', 'Akwá'], [' DOUALA  ', ' akwa ']]) {
+        await problemOf(await addZone(zonesAgency, adminAccess, { city, district }), 409, 'ZONE_ALREADY_SERVED', `duplicate ${city}/${district}`);
+      }
+      assert.equal((await addZone(zonesAgency, ownerAccess, { city: 'Douala' })).status, 201, 'a city and one of its districts are different zones');
+      const refusedZones = [{}, { district: 'Akwa' }, { city: 'x' }, { city: 'x'.repeat(81) }, { city: 'Douala', district: 'x' }, { city: 'Douala', district: 'x'.repeat(81) }, { city: 5 }, { city: 'Dou\u0000ala' }, { city: 'Kumba', agencyId: outsiderOwn }, { city: 'Kumba', status: 'retired' }, { city: 'Kumba', id: randomUUID() }];
+      for (const body of refusedZones) assert.equal((await addZone(zonesAgency, ownerAccess, body)).status, 400, `zone refused ${JSON.stringify(body).slice(0, 60)}`);
+      assert.equal((await act('POST', `${zonesAgency}/zones`, ownerAccess, ['Douala'])).status, 400, 'a list is not a zone');
+      assert.equal((await addZone(zonesAgency, ownerAccess, { city: 'x'.repeat(80) })).status, 201, 'a city of 80 characters');
+      assert.equal((await addZone(zonesAgency, ownerAccess, { city: 'xx' })).status, 201, 'a city of 2 characters');
+      assert.equal((await zoneRows(zonesAgency)).length, 6, 'only the accepted zones exist');
+      await assertHidden('add zone', 'POST', agency => `${agency}/zones`, { city: 'Kumba' });
+      assert.equal((await addZone(zonesAgency, agentAccess, { city: 'Kumba' })).status, 403, 'an agent cannot add a zone');
+      assert.equal((await zoneRows(zonesAgency)).length, 6, 'refused additions wrote nothing');
+
+      for (const [role, access] of [...writers, ['agent', agentAccess]]) {
+        const list = await act('GET', `${zonesAgency}/zones`, access);
+        assert.equal(list.status, 200, `${role} reads the zones`);
+        assert.match(list.headers.get('cache-control'), /no-store/);
+        const page = await list.json();
+        assert.deepEqual([page.items.length, page.hasMore, page.nextCursor], [6, false, null], `${role}: one page`);
+        assert.deepEqual(page.items.map(zone => zone.status), Array(6).fill('active'));
+      }
+      await assertHidden('list zones', 'GET', agency => `${agency}/zones`);
+
+      // Retirement: logical, audited, never physical.
+      const retireZone = (agency, zone, access) => act('DELETE', `${agency}/zones/${zone}`, access);
+      assert.equal((await retireZone(zonesAgency, akwa.id, agentAccess)).status, 403, 'an agent cannot retire a zone');
+      const retired = await retireZone(zonesAgency, akwa.id, adminAccess);
+      assert.equal(retired.status, 200, 'an administrator retires a zone');
+      const retiredBody = await retired.json();
+      assert.deepEqual([retiredBody.id, retiredBody.status, retiredBody.retiredAt === null], [akwa.id, 'retired', false]);
+      assert.equal((await zoneRows(zonesAgency)).length, 6, 'a retired zone is kept');
+      await problemOf(await retireZone(zonesAgency, akwa.id, ownerAccess), 409, 'ZONE_ALREADY_RETIRED', 'retiring twice');
+      assert.equal((await retireZone(zonesAgency, randomUUID(), ownerAccess)).status, 404, 'an unknown zone');
+      assert.equal((await retireZone(zonesAgency, 'not-a-uuid', ownerAccess)).status, 400, 'invalid zone id');
+      const foreignZone = (await (await addZone(outsiderOwn, outsiderAccess, { city: 'Bafoussam' })).json()).id;
+      const unknownZone = withoutEcho(await (await retireZone(zonesAgency, randomUUID(), ownerAccess)).json());
+      const foreignRetire = await retireZone(zonesAgency, foreignZone, ownerAccess);
+      assert.equal(foreignRetire.status, 404, 'a zone of another agency is not found');
+      assert.deepEqual(withoutEcho(await foreignRetire.json()), unknownZone, 'same answer as an unknown zone');
+      assert.equal((await retireZone(outsiderOwn, foreignZone, ownerAccess)).status, 404, 'nor through the other agency');
+      assert.equal((await zoneRows(outsiderOwn))[0].retired_at, null, 'the other agency zone is untouched');
+      await assertHidden('retire zone', 'DELETE', agency => `${agency}/zones/${foreignZone}`);
+      const listedAfter = await (await act('GET', `${zonesAgency}/zones`, agentAccess)).json();
+      assert.equal(listedAfter.items.at(-1).id, akwa.id, 'retired zones come after the active ones');
+      assert.equal(listedAfter.items.at(-1).status, 'retired');
+      const readded = await addZone(zonesAgency, ownerAccess, { city: 'douala', district: 'AKWÁ' });
+      assert.equal(readded.status, 201, 'adding a retired zone again is accepted');
+      assert.deepEqual([(await readded.json()).id, (await zoneRows(zonesAgency)).length], [akwa.id, 6], 'it is the same zone, not a second one');
+      assert.equal((await zoneRows(zonesAgency)).find(zone => zone.id === akwa.id).retired_at, null);
+
+      // Pagination, with zones inserted in bulk.
+      const pagedZones = await configAgency();
+      await agencyPool.query("INSERT INTO service_zones (id, agency_id, city, district, city_key, district_key, added_at) SELECT gen_random_uuid(), $1, 'Ville ' || lpad(n::text, 2, '0'), NULL, 'ville ' || lpad(n::text, 2, '0'), '', now() FROM generate_series(1, 25) n", [pagedZones]);
+      await agencyPool.query("UPDATE service_zones SET retired_at = now() WHERE agency_id = $1 AND city IN ('Ville 03', 'Ville 04')", [pagedZones]);
+      const seenZones = [];
+      let zoneCursor = null;
+      const sizes = [];
+      for (let guard = 0; guard < 10; guard++) {
+        const page = await (await act('GET', `${pagedZones}/zones?limit=10${zoneCursor ? `&cursor=${zoneCursor}` : ''}`, agentAccess)).json();
+        sizes.push([page.items.length, page.hasMore]);
+        seenZones.push(...page.items);
+        if (!page.hasMore) { assert.equal(page.nextCursor, null); break; }
+        assert.equal(page.nextCursor, page.items.at(-1).id);
+        zoneCursor = page.nextCursor;
+      }
+      assert.deepEqual(sizes, [[10, true], [10, true], [5, false]], 'pages of 10, 10 and 5');
+      assert.equal(new Set(seenZones.map(zone => zone.id)).size, 25, 'no zone twice, none missing');
+      assert.deepEqual(seenZones.map(zone => zone.status), [...Array(23).fill('active'), 'retired', 'retired'], 'active zones first, then retired ones');
+      assert.deepEqual(seenZones.slice(0, 3).map(zone => zone.city), ['Ville 01', 'Ville 02', 'Ville 05'], 'ordered by city');
+      for (const limit of ['0', '101', 'abc', '1.5', '-1']) assert.equal((await act('GET', `${pagedZones}/zones?limit=${limit}`, ownerAccess)).status, 400, `limit ${limit}`);
+      assert.equal((await act('GET', `${pagedZones}/zones?cursor=not-a-uuid`, ownerAccess)).status, 400, 'invalid cursor');
+      assert.equal((await (await act('GET', `${pagedZones}/zones?limit=100`, ownerAccess)).json()).items.length, 25, 'a limit of 100');
+
+      // At most 100 active zones.
+      await agencyPool.query("INSERT INTO service_zones (id, agency_id, city, district, city_key, district_key, added_at) SELECT gen_random_uuid(), $1, 'Bourg ' || lpad(n::text, 3, '0'), NULL, 'bourg ' || lpad(n::text, 3, '0'), '', now() FROM generate_series(1, 77) n", [pagedZones]);
+      const full = await agencyPool.query('SELECT count(*)::int AS active FROM service_zones WHERE agency_id = $1 AND retired_at IS NULL', [pagedZones]);
+      assert.equal(full.rows[0].active, 100);
+      await problemOf(await addZone(pagedZones, ownerAccess, { city: 'Kribi' }), 409, 'ZONE_LIMIT_REACHED', 'the 101st zone');
+      await problemOf(await addZone(pagedZones, ownerAccess, { city: 'Ville 03' }), 409, 'ZONE_LIMIT_REACHED', 'reactivation is an addition too');
+      assert.equal((await addZone(pagedZones, ownerAccess, { city: 'Ville 01' })).status, 409, 'a duplicate is still a conflict at the limit');
+      const hundredth = (await agencyPool.query("SELECT id FROM service_zones WHERE agency_id = $1 AND city = 'Bourg 001'", [pagedZones])).rows[0].id;
+      assert.equal((await retireZone(pagedZones, hundredth, ownerAccess)).status, 200);
+      assert.equal((await addZone(pagedZones, ownerAccess, { city: 'Kribi' })).status, 201, 'a retired zone frees a place');
+
+      // Database guards, behind the domain rules.
+      await assert.rejects(agencyPool.query("INSERT INTO service_zones (id, agency_id, city, district, city_key, district_key, added_at) VALUES ($1, $2, 'Douala', 'Akwa', 'douala', 'akwa', now())", [randomUUID(), zonesAgency]), /service_zones_active_area_unique/, 'the database refuses two active equal zones');
+      await assert.rejects(agencyPool.query("INSERT INTO service_zones (id, agency_id, city, district, city_key, district_key, added_at) VALUES ($1, $2, 'x', NULL, 'x', '', now())", [randomUUID(), zonesAgency]), /service_zones_city_length/, 'the database refuses a short city');
+      await assert.rejects(agencyPool.query("INSERT INTO service_zones (id, agency_id, city, district, city_key, district_key, added_at) VALUES ($1, $2, 'Douala', NULL, 'douala', '', now())", [randomUUID(), randomUUID()]), /service_zones_agency_id_agencies_id_fk/, 'a zone belongs to an agency');
+      await agencyPool.query("INSERT INTO service_zones (id, agency_id, city, district, city_key, district_key, added_at, retired_at) VALUES ($1, $2, 'Douala', 'Akwa', 'douala', 'akwa', now(), now())", [randomUUID(), zonesAgency]);
+
+      // Sites
+      const sitesAgency = await configAgency();
+      activeOne = sitesAgency;
+      const createSite = (agency, access, body) => act('POST', `${agency}/sites`, access, body);
+      const patchSite = (agency, site, access, body, ifMatch) => act('PATCH', `${agency}/sites/${site}`, access, body, ifMatch === undefined ? {} : { 'if-match': ifMatch });
+      const siteAction = (agency, site, action, access) => act('POST', `${agency}/sites/${site}/${action}`, access);
+      const akwaSite = await createSite(sitesAgency, ownerAccess, { name: '  Agence  Akwa ', city: 'Douala', address: 'Rue Joss, face Total Akwa', phone: '6 77 12 34 56' });
+      assert.equal(akwaSite.status, 201, 'the owner creates a site');
+      assert.match(akwaSite.headers.get('cache-control'), /no-store/);
+      assert.equal(akwaSite.headers.get('etag'), '"1"', 'the site version is an ETag');
+      const site = await akwaSite.json();
+      assert.match(site.id, UUID);
+      assert.deepEqual({ ...site, id: undefined, createdAt: undefined }, { id: undefined, name: 'Agence Akwa', city: 'Douala', address: 'Rue Joss, face Total Akwa', phone: '+237677123456', status: 'active', createdAt: undefined, deactivatedAt: null, version: 1 });
+      const depot = await (await createSite(sitesAgency, adminAccess, { name: 'Dépôt Bonabéri', city: 'Douala', address: 'Zone industrielle de Bonabéri' })).json();
+      assert.deepEqual([depot.phone, depot.version], [null, 1], 'the phone is optional');
+      for (const name of ['Agence Akwa', 'agence AKWA', 'Agence  Akwà']) {
+        await problemOf(await createSite(sitesAgency, adminAccess, { name, city: 'Douala', address: 'Rue Joss, Akwa' }), 409, 'SITE_NAME_TAKEN', `duplicate ${name}`);
+      }
+      const refusedSites = [
+        {}, { name: 'Agence Bali', city: 'Douala' }, { city: 'Douala', address: 'Rue Joss, Akwa' },
+        { name: 'x', city: 'Douala', address: 'Rue Joss, Akwa' }, { name: 'x'.repeat(121), city: 'Douala', address: 'Rue Joss, Akwa' },
+        { name: 'Agence Bali', city: 'x', address: 'Rue Joss, Akwa' }, { name: 'Agence Bali', city: 'x'.repeat(81), address: 'Rue Joss, Akwa' },
+        { name: 'Agence Bali', city: 'Douala', address: 'Rue' }, { name: 'Agence Bali', city: 'Douala', address: 'x'.repeat(301) },
+        { name: 'Agence Bali', city: 'Douala', address: 'Rue Joss, Akwa', phone: '677 12 34' }, { name: 'Agence Bali', city: 'Douala', address: 'Rue Joss, Akwa', phone: '+33 6 12 34 56 78' },
+        { name: 'Agence Bali', city: 'Douala', address: 'Rue Joss, Akwa', phone: 677123456 }, { name: 5, city: 'Douala', address: 'Rue Joss, Akwa' },
+        { name: 'Agence\u0000Bali', city: 'Douala', address: 'Rue Joss, Akwa' }, { name: 'Agence Bali', city: 'Douala', address: 'Rue Joss, Akwa', status: 'active' },
+        { name: 'Agence Bali', city: 'Douala', address: 'Rue Joss, Akwa', agencyId: outsiderOwn }, { name: 'Agence Bali', city: 'Douala', address: 'Rue Joss, Akwa', version: 4 },
+      ];
+      for (const body of refusedSites) assert.equal((await createSite(sitesAgency, ownerAccess, body)).status, 400, `site refused ${JSON.stringify(body).slice(0, 70)}`);
+      assert.equal((await createSite(sitesAgency, ownerAccess, { name: 'xx', city: 'xx', address: 'x'.repeat(5), phone: '  ' })).status, 201, 'minimal bounds, a blank phone');
+      assert.equal((await createSite(sitesAgency, ownerAccess, { name: 'n'.repeat(120), city: 'c'.repeat(80), address: 'a'.repeat(300) })).status, 201, 'maximal bounds');
+      assert.equal((await createSite(sitesAgency, agentAccess, { name: 'Agence Bali', city: 'Douala', address: 'Rue Joss, Akwa' })).status, 403, 'an agent cannot create a site');
+      await assertHidden('create site', 'POST', agency => `${agency}/sites`, { name: 'Agence Bali', city: 'Douala', address: 'Rue Joss, Akwa' });
+      assert.equal((await agencyPool.query('SELECT count(*)::int AS total FROM agency_sites WHERE agency_id = $1', [sitesAgency])).rows[0].total, 4, 'only the accepted sites exist');
+
+      // Modification under the version of the site.
+      assert.equal((await patchSite(sitesAgency, site.id, ownerAccess, { city: 'Yaoundé' })).status, 428, 'If-Match is required');
+      for (const malformed of ['abc', '"abc"', '0', '-1', '1.5', 'W/"1"', '"1", "2"', '*', '99999999999', '']) {
+        assert.equal((await patchSite(sitesAgency, site.id, ownerAccess, { city: 'Yaoundé' }, malformed)).status, 400, `If-Match ${JSON.stringify(malformed)} refused`);
+      }
+      const edited = await patchSite(sitesAgency, site.id, adminAccess, { address: ' Rue Joss,  immeuble Bleu ', phone: null }, '"1"');
+      assert.equal(edited.status, 200, 'an administrator edits the site');
+      assert.equal(edited.headers.get('etag'), '"2"');
+      assert.match(edited.headers.get('cache-control'), /no-store/);
+      const editedBody = await edited.json();
+      assert.deepEqual([editedBody.version, editedBody.address, editedBody.phone, editedBody.name, editedBody.city], [2, 'Rue Joss, immeuble Bleu', null, 'Agence Akwa', 'Douala'], 'partial update keeps the other fields');
+      await problemOf(await patchSite(sitesAgency, site.id, ownerAccess, { city: 'Yaoundé' }, '1'), 409, 'STALE_SITE_VERSION', 'stale site version');
+      await problemOf(await patchSite(sitesAgency, site.id, ownerAccess, { city: 'Yaoundé' }, '3'), 409, 'STALE_SITE_VERSION', 'future site version');
+      const unchanged = await patchSite(sitesAgency, site.id, ownerAccess, { name: 'Agence Akwa', city: 'Douala' }, '2');
+      assert.deepEqual([unchanged.status, (await unchanged.json()).version], [200, 2], 'no real change: same version');
+      await problemOf(await patchSite(sitesAgency, site.id, ownerAccess, { name: 'DÉPÔT bonabéri' }, '2'), 409, 'SITE_NAME_TAKEN', 'rename to a taken name');
+      assert.equal((await patchSite(sitesAgency, site.id, ownerAccess, { name: 'AGENCE AKWA' }, '2')).status, 200, 'a change of case on its own name');
+      for (const body of [{ name: null }, { city: null }, { address: null }, { name: 'x' }, { phone: '12' }, { status: 'inactive' }, { version: 9 }, { agencyId: outsiderOwn }, { id: randomUUID() }]) {
+        assert.equal((await patchSite(sitesAgency, site.id, ownerAccess, body, '3')).status, 400, `site change refused ${JSON.stringify(body)}`);
+      }
+      assert.equal((await patchSite(sitesAgency, site.id, agentAccess, { city: 'Kribi' }, '3')).status, 403, 'an agent cannot edit a site');
+      assert.equal((await patchSite(sitesAgency, randomUUID(), ownerAccess, { city: 'Kribi' }, '1')).status, 404, 'an unknown site');
+      assert.equal((await patchSite(sitesAgency, 'not-a-uuid', ownerAccess, { city: 'Kribi' }, '1')).status, 400, 'invalid site id');
+      const foreignSite = (await (await createSite(outsiderOwn, outsiderAccess, { name: 'Dépôt Bafoussam', city: 'Bafoussam', address: 'Rue du Marché, Bafoussam' })).json()).id;
+      assert.equal((await patchSite(sitesAgency, foreignSite, ownerAccess, { city: 'Kribi' }, '1')).status, 404, 'a site of another agency is not found');
+      assert.equal((await siteAction(sitesAgency, foreignSite, 'deactivate', ownerAccess)).status, 404, 'nor deactivated');
+      assert.equal((await siteAction(outsiderOwn, foreignSite, 'deactivate', ownerAccess)).status, 404, 'nor through the other agency');
+      assert.equal((await agencyPool.query('SELECT deactivated_at, version FROM agency_sites WHERE id = $1', [foreignSite])).rows[0].version, 1, 'the other agency site is untouched');
+      await assertHidden('edit site', 'PATCH', agency => `${agency}/sites/${foreignSite}`, { city: 'Kribi' }, { 'if-match': '1' });
+      await assertHidden('deactivate site', 'POST', agency => `${agency}/sites/${foreignSite}/deactivate`);
+      await assertHidden('reactivate site', 'POST', agency => `${agency}/sites/${foreignSite}/reactivate`);
+      await assertHidden('list sites', 'GET', agency => `${agency}/sites`);
+
+      // Deactivation and reactivation.
+      assert.equal((await siteAction(sitesAgency, depot.id, 'deactivate', agentAccess)).status, 403, 'an agent cannot deactivate');
+      const off = await siteAction(sitesAgency, depot.id, 'deactivate', adminAccess);
+      assert.equal(off.status, 200, 'an administrator deactivates a site');
+      const offBody = await off.json();
+      assert.deepEqual([offBody.status, offBody.deactivatedAt === null, offBody.version], ['inactive', false, 2]);
+      await problemOf(await siteAction(sitesAgency, depot.id, 'deactivate', ownerAccess), 409, 'SITE_DEACTIVATED', 'deactivating twice');
+      await problemOf(await patchSite(sitesAgency, depot.id, ownerAccess, { city: 'Edéa' }, '2'), 409, 'SITE_DEACTIVATED', 'editing a deactivated site');
+      assert.equal((await agencyPool.query('SELECT count(*)::int AS total FROM agency_sites WHERE id = $1', [depot.id])).rows[0].total, 1, 'a deactivated site is kept');
+      assert.equal((await createSite(sitesAgency, ownerAccess, { name: 'dépôt bonabéri', city: 'Douala', address: 'Zone industrielle' })).status, 201, 'a deactivated site frees its name');
+      await problemOf(await siteAction(sitesAgency, depot.id, 'reactivate', ownerAccess), 409, 'SITE_NAME_TAKEN', 'reactivating over a taken name');
+      await problemOf(await siteAction(sitesAgency, site.id, 'reactivate', ownerAccess), 409, 'SITE_ALREADY_ACTIVE', 'reactivating an active site');
+      assert.equal((await siteAction(sitesAgency, depot.id, 'reactivate', agentAccess)).status, 403, 'an agent cannot reactivate');
+      const removedTwin = (await agencyPool.query("SELECT id FROM agency_sites WHERE agency_id = $1 AND name = 'dépôt bonabéri'", [sitesAgency])).rows[0].id;
+      assert.equal((await siteAction(sitesAgency, removedTwin, 'deactivate', ownerAccess)).status, 200);
+      const back = await siteAction(sitesAgency, depot.id, 'reactivate', ownerAccess);
+      assert.equal(back.status, 200, 'a deactivated site comes back once its name is free');
+      assert.deepEqual([(await back.json()).status, (await agencyPool.query('SELECT version FROM agency_sites WHERE id = $1', [depot.id])).rows[0].version], ['active', 3]);
+
+      // Site list: every member reads it, paginated.
+      const pagedSites = await configAgency();
+      await agencyPool.query("INSERT INTO agency_sites (id, agency_id, name, name_key, city, address, created_at) SELECT gen_random_uuid(), $1, 'Site ' || lpad(n::text, 2, '0'), 'site ' || lpad(n::text, 2, '0'), 'Douala', 'Rue du Marché, Akwa', now() FROM generate_series(1, 25) n", [pagedSites]);
+      await agencyPool.query("UPDATE agency_sites SET deactivated_at = now() WHERE agency_id = $1 AND name = 'Site 02'", [pagedSites]);
+      const seenSites = [];
+      let siteCursor = null;
+      const siteSizes = [];
+      for (let guard = 0; guard < 10; guard++) {
+        const response = await act('GET', `${pagedSites}/sites?limit=20${siteCursor ? `&cursor=${siteCursor}` : ''}`, agentAccess);
+        assert.equal(response.status, 200, 'an agent reads the sites');
+        assert.match(response.headers.get('cache-control'), /no-store/);
+        const page = await response.json();
+        siteSizes.push([page.items.length, page.hasMore]);
+        seenSites.push(...page.items);
+        if (!page.hasMore) { assert.equal(page.nextCursor, null); break; }
+        siteCursor = page.nextCursor;
+      }
+      assert.deepEqual(siteSizes, [[20, true], [5, false]], '25 sites: 20 then 5');
+      assert.deepEqual(seenSites.map(item => item.status), [...Array(24).fill('active'), 'inactive'], 'active sites first');
+      assert.deepEqual(seenSites.slice(0, 3).map(item => item.name), ['Site 01', 'Site 03', 'Site 04'], 'ordered by name');
+      assert.deepEqual(Object.keys(seenSites[0]).sort(), ['address', 'city', 'createdAt', 'deactivatedAt', 'id', 'name', 'phone', 'status', 'version']);
+      for (const limit of ['0', '101', 'abc']) assert.equal((await act('GET', `${pagedSites}/sites?limit=${limit}`, ownerAccess)).status, 400, `site limit ${limit}`);
+      assert.equal((await act('GET', `${pagedSites}/sites?cursor=nope`, ownerAccess)).status, 400, 'invalid site cursor');
+      await assert.rejects(agencyPool.query("INSERT INTO agency_sites (id, agency_id, name, name_key, city, address, created_at) VALUES ($1, $2, 'site 05', 'site 05', 'Douala', 'Rue du Marché', now())", [randomUUID(), pagedSites]), /agency_sites_active_name_unique/, 'the database refuses two active sites with one name');
+      await assert.rejects(agencyPool.query("INSERT INTO agency_sites (id, agency_id, name, name_key, city, address, phone, created_at) VALUES ($1, $2, 'Site 99', 'site 99', 'Douala', 'Rue du Marché', '0677', now())", [randomUUID(), pagedSites]), /agency_sites_phone_format/, 'the database refuses a malformed phone');
+      await assert.rejects(agencyPool.query("INSERT INTO agency_sites (id, agency_id, name, name_key, city, address, created_at) VALUES ($1, $2, 'S', 's', 'Douala', 'Rue du Marché', now())", [randomUUID(), pagedSites]), /agency_sites_name_length/, 'the database refuses a short name');
+      await agencyPool.query("INSERT INTO agency_sites (id, agency_id, name, name_key, city, address, created_at, deactivated_at) VALUES ($1, $2, 'Site 05', 'site 05', 'Douala', 'Rue du Marché', now(), now())", [randomUUID(), pagedSites]);
+
+      // Capabilities
+      const capsAgency = await configAgency();
+      activeOne = capsAgency;
+      const toggle = (agency, type, action, access, body) => act('POST', `${agency}/capabilities/${type}/${action}`, access, body);
+      const enable = (agency, type, access) => toggle(agency, type, 'activate', access);
+      const suspend = (agency, type, access, reason = 'Inventaire annuel') => toggle(agency, type, 'suspend', access, { reason });
+      const missing = async (response, element, message) => assert.deepEqual((await problemOf(response, 400, 'CAPABILITY_PREREQUISITE_MISSING', message)).missing, [element], message);
+      await missing(await enable(capsAgency, 'delivery', adminAccess), 'active_zone', 'delivery without a zone');
+      await missing(await enable(capsAgency, 'storage', ownerAccess), 'active_site', 'storage without a site');
+      for (const type of ['air', 'DELIVERY', 'hybrid', 'delivery%20']) assert.equal((await enable(capsAgency, type, ownerAccess)).status, 400, `unknown capability ${type}`);
+      assert.equal((await act('POST', `${capsAgency}/capabilities/delivery/activate`, ownerAccess, { capability: 'storage' })).status, 400, 'no body is expected');
+      assert.equal((await agencyPool.query('SELECT count(*)::int AS total FROM agency_capability_transitions WHERE agency_id = $1', [capsAgency])).rows[0].total, 0, 'refusals wrote nothing');
+      assert.equal((await enable(capsAgency, 'delivery', agentAccess)).status, 403, 'an agent cannot enable');
+      await assertHidden('enable capability', 'POST', agency => `${agency}/capabilities/delivery/activate`);
+      await assertHidden('suspend capability', 'POST', agency => `${agency}/capabilities/delivery/suspend`, { reason: 'Inventaire annuel' });
+
+      assert.equal((await addZone(capsAgency, ownerAccess, { city: 'Douala', district: 'Akwa' })).status, 201);
+      assert.equal((await enable(capsAgency, 'storage', ownerAccess)).status, 400, 'a zone is not enough for storage');
+      const delivering = await enable(capsAgency, 'delivery', adminAccess);
+      assert.equal(delivering.status, 200, 'an administrator enables delivery');
+      assert.match(delivering.headers.get('cache-control'), /no-store/);
+      const deliveringBody = await delivering.json();
+      assert.deepEqual(deliveringBody.capabilities.map(({ since, ...rest }) => rest), [{ type: 'delivery', state: 'active', reason: null, acceptsNewRequests: true }]);
+      assert.ok(Number.isFinite(Date.parse(deliveringBody.capabilities[0].since)));
+      assert.equal(deliveringBody.hybrid, false);
+      await problemOf(await enable(capsAgency, 'delivery', ownerAccess), 409, 'CAPABILITY_ALREADY_ACTIVE', 'enabling twice');
+      assert.equal((await configAudit(capsAgency)).filter(entry => entry.action === 'agency.capability_enabled').length, 1, 'one audit row, no second trace');
+      await problemOf(await suspend(capsAgency, 'storage', ownerAccess), 409, 'CAPABILITY_NOT_ACTIVE', 'suspending a capability never enabled');
+      await problemOf(await retireZone(capsAgency, (await zoneRows(capsAgency))[0].id, ownerAccess), 409, 'LAST_ACTIVE_ZONE', 'the last zone stays while delivery is active');
+      assert.equal((await zoneRows(capsAgency))[0].retired_at, null);
+
+      assert.equal((await createSite(capsAgency, ownerAccess, { name: 'Dépôt Bonabéri', city: 'Douala', address: 'Zone industrielle de Bonabéri' })).status, 201);
+      const depotId = (await agencyPool.query('SELECT id FROM agency_sites WHERE agency_id = $1', [capsAgency])).rows[0].id;
+      const hybrid = await (await enable(capsAgency, 'storage', ownerAccess)).json();
+      assert.deepEqual([hybrid.capabilities.map(item => item.type), hybrid.hybrid], [['delivery', 'storage'], true], 'both capabilities make the agency hybrid');
+      await problemOf(await siteAction(capsAgency, depotId, 'deactivate', ownerAccess), 409, 'LAST_ACTIVE_SITE', 'the last site stays while storage is active');
+      assert.equal((await agencyPool.query('SELECT deactivated_at FROM agency_sites WHERE id = $1', [depotId])).rows[0].deactivated_at, null);
+
+      const state = await (await getOnboarding(agentAccess, capsAgency)).json();
+      assert.deepEqual([state.hybrid, state.activeZones, state.activeSites, state.capabilities.map(item => [item.type, item.state, item.acceptsNewRequests])], [true, 1, 1, [['delivery', 'active', true], ['storage', 'active', true]]], 'the onboarding state shows the real configuration');
+      assert.deepEqual(state.prerequisites.filter(item => item.filled).map(item => item.code), ['active_capability', 'active_site']);
+
+      assert.equal((await suspend(capsAgency, 'storage', agentAccess)).status, 403, 'an agent cannot suspend');
+      for (const body of [{}, { reason: '' }, { reason: 'ok' }, { reason: '   ab  ' }, { reason: 'x'.repeat(501) }, { reason: 5 }, { reason: 'Motif\u0000' }, { reason: 'Inventaire annuel', extra: true }]) {
+        assert.equal((await toggle(capsAgency, 'storage', 'suspend', ownerAccess, body)).status, 400, `suspension refused ${JSON.stringify(body).slice(0, 50)}`);
+      }
+      assert.equal((await toggle(capsAgency, 'air', 'suspend', ownerAccess, { reason: 'Inventaire annuel' })).status, 400, 'suspending an unknown capability');
+      assert.equal((await act('POST', `${capsAgency}/capabilities/storage/suspend`, ownerAccess)).status, 400, 'a reason is required');
+      assert.equal((await suspend(capsAgency, 'storage', ownerAccess, 'abc')).status, 200, 'a reason of 3 characters');
+      assert.equal((await enable(capsAgency, 'storage', ownerAccess)).status, 200, 'a suspended capability is enabled again by the same action');
+      const suspended = await suspend(capsAgency, 'storage', adminAccess, ' Inventaire annuel ');
+      assert.equal(suspended.status, 200, 'an administrator suspends storage');
+      const suspendedBody = await suspended.json();
+      const storage = suspendedBody.capabilities.find(item => item.type === 'storage');
+      assert.deepEqual([storage.state, storage.reason, storage.acceptsNewRequests, suspendedBody.hybrid], ['suspended', 'Inventaire annuel', false, false]);
+      assert.equal(suspendedBody.capabilities.find(item => item.type === 'delivery').state, 'active', 'the other capability is untouched');
+      await problemOf(await suspend(capsAgency, 'storage', ownerAccess, 'Autre motif'), 409, 'CAPABILITY_NOT_ACTIVE', 'suspending twice');
+      assert.equal((await suspend(capsAgency, 'storage', ownerAccess, 'x'.repeat(500))).status, 409, 'a 500 character reason is valid, the state is what refuses');
+      const suspendedState = await (await getOnboarding(ownerAccess, capsAgency)).json();
+      assert.deepEqual(suspendedState.capabilities.find(item => item.type === 'storage'), { type: 'storage', state: 'suspended', since: suspendedState.capabilities.find(item => item.type === 'storage').since, reason: 'Inventaire annuel', acceptsNewRequests: false });
+      assert.equal((await siteAction(capsAgency, depotId, 'deactivate', ownerAccess)).status, 200, 'the last site can go once storage is suspended');
+      await missing(await enable(capsAgency, 'storage', ownerAccess), 'active_site', 'a suspended capability is enabled again only with its configuration');
+      assert.equal((await siteAction(capsAgency, depotId, 'reactivate', ownerAccess)).status, 200);
+      assert.equal((await enable(capsAgency, 'storage', ownerAccess)).status, 200, 'enabled again');
+      const history = await agencyPool.query("SELECT type, kind, sequence, reason FROM agency_capability_transitions WHERE agency_id = $1 AND type = 'storage' ORDER BY sequence", [capsAgency]);
+      assert.deepEqual(history.rows.map(row => [row.kind, row.sequence, row.reason]), [['activated', 1, null], ['suspended', 2, 'abc'], ['activated', 3, null], ['suspended', 4, 'Inventaire annuel'], ['activated', 5, null]], 'the history of the capability is kept');
+      assert.equal((await retireZone(capsAgency, (await zoneRows(capsAgency))[0].id, ownerAccess)).status === 409, true, 'delivery still protects its last zone');
+
+      assert.equal((await suspend(capsAgency, 'delivery', ownerAccess)).status, 200, 'the last capability of a kind can be suspended');
+      assert.equal((await retireZone(capsAgency, (await zoneRows(capsAgency))[0].id, ownerAccess)).status, 200, 'the last zone can go once delivery is suspended');
+      await missing(await enable(capsAgency, 'delivery', ownerAccess), 'active_zone', 'delivery without a zone again');
+      assert.equal((await addZone(capsAgency, ownerAccess, { city: 'Douala', district: 'Akwa' })).status, 201, 'the zone comes back');
+      assert.equal((await enable(capsAgency, 'delivery', ownerAccess)).status, 200, 'and so does delivery');
+
+      await assert.rejects(agencyPool.query("INSERT INTO agency_capability_transitions (agency_id, type, sequence, kind, reason, actor_id, occurred_at) VALUES ($1, 'delivery', 1, 'activated', NULL, $2, now())", [capsAgency, account.id]), /agency_capability_transitions_pkey/, 'the database refuses two transitions with one sequence');
+      await assert.rejects(agencyPool.query("INSERT INTO agency_capability_transitions (agency_id, type, sequence, kind, reason, actor_id, occurred_at) VALUES ($1, 'delivery', 99, 'suspended', NULL, $2, now())", [capsAgency, account.id]), /agency_capability_transitions_reason_matches_kind/, 'a suspension needs a reason');
+      await assert.rejects(agencyPool.query("INSERT INTO agency_capability_transitions (agency_id, type, sequence, kind, reason, actor_id, occurred_at) VALUES ($1, 'air', 1, 'activated', NULL, $2, now())", [capsAgency, account.id]), /agency_capability_transitions_type_valid/, 'only two capabilities exist');
+
+      // The configuration stays editable once the agency is submitted.
+      const submittedAgency = await configAgency();
+      await agencyPool.query("UPDATE agencies SET status = 'submitted', submitted_at = now(), submitted_by = $2 WHERE id = $1", [submittedAgency, account.id]);
+      assert.equal((await addZone(submittedAgency, adminAccess, { city: 'Douala', district: 'Bépanda' })).status, 201, 'a zone on a submitted agency');
+      assert.equal((await createSite(submittedAgency, adminAccess, { name: 'Comptoir Deïdo', city: 'Douala', address: 'Rue de Deïdo, face Total' })).status, 201, 'a site on a submitted agency');
+      assert.equal((await enable(submittedAgency, 'delivery', adminAccess)).status, 200, 'a capability on a submitted agency');
+      assert.equal((await suspend(submittedAgency, 'delivery', adminAccess)).status, 200, 'and its suspension');
+      assert.equal((await getOnboarding(ownerAccess, submittedAgency).then(response => response.json())).status, 'submitted', 'the status did not move');
+
+      // Concurrency: the lock on the agency row serializes every configuration write.
+      const double = await configAgency();
+      assert.equal((await addZone(double, ownerAccess, { city: 'Douala', district: 'Akwa' })).status, 201);
+      const twinEnables = await Promise.all([enable(double, 'delivery', ownerAccess), enable(double, 'delivery', adminAccess)]);
+      assert.deepEqual(twinEnables.map(response => response.status).sort(), [200, 409], 'two simultaneous activations: one wins');
+      assert.equal((await configAudit(double)).filter(entry => entry.action === 'agency.capability_enabled').length, 1, 'one activation is audited');
+      assert.equal((await agencyPool.query("SELECT count(*)::int AS total FROM agency_capability_transitions WHERE agency_id = $1 AND kind = 'activated'", [double])).rows[0].total, 1, 'one activation is stored');
+      const twinSuspensions = await Promise.all([suspend(double, 'delivery', ownerAccess), suspend(double, 'delivery', adminAccess)]);
+      assert.deepEqual(twinSuspensions.map(response => response.status).sort(), [200, 409], 'two simultaneous suspensions: one wins');
+      assert.equal((await configAudit(double)).filter(entry => entry.action === 'agency.capability_suspended').length, 1, 'one suspension is audited');
+      const sameZone = await configAgency();
+      const twinZones = await Promise.all([addZone(sameZone, ownerAccess, { city: 'Douala', district: 'Deïdo' }), addZone(sameZone, adminAccess, { city: 'DOUALA', district: 'DEÏDO' })]);
+      assert.deepEqual(twinZones.map(response => response.status).sort(), [201, 409], 'two simultaneous additions of one zone: one wins');
+      assert.equal((await zoneRows(sameZone)).length, 1, 'one zone');
+      const sameSite = await configAgency();
+      const twinSites = await Promise.all([createSite(sameSite, ownerAccess, { name: 'Agence Akwa', city: 'Douala', address: 'Rue Joss, Akwa' }), createSite(sameSite, adminAccess, { name: 'AGENCE akwa', city: 'Douala', address: 'Rue Joss, Akwa' })]);
+      assert.deepEqual(twinSites.map(response => response.status).sort(), [201, 409], 'two simultaneous creations of one site: one wins');
+      assert.equal((await agencyPool.query('SELECT count(*)::int AS total FROM agency_sites WHERE agency_id = $1', [sameSite])).rows[0].total, 1, 'one site');
+      for (let round = 0; round < 4; round++) {
+        const lastZone = await configAgency();
+        const zone = await (await addZone(lastZone, ownerAccess, { city: 'Douala', district: 'Akwa' })).json();
+        const [activation, removal] = await Promise.all([enable(lastZone, 'delivery', ownerAccess), retireZone(lastZone, zone.id, adminAccess)]);
+        assert.ok((activation.status === 200 && removal.status === 409) || (activation.status === 400 && removal.status === 200), `round ${round}: the last zone against delivery: ${activation.status}/${removal.status}`);
+        const delivery = await agencyPool.query("SELECT (SELECT kind FROM agency_capability_transitions WHERE agency_id = $1 AND type = 'delivery' ORDER BY sequence DESC LIMIT 1) AS kind, (SELECT count(*)::int FROM service_zones WHERE agency_id = $1 AND retired_at IS NULL) AS zones", [lastZone]);
+        assert.ok(!(delivery.rows[0].kind === 'activated' && delivery.rows[0].zones === 0), `round ${round}: delivery is never active without a zone`);
+        const lastSite = await configAgency();
+        const lastSiteId = (await (await createSite(lastSite, ownerAccess, { name: 'Dépôt Bonabéri', city: 'Douala', address: 'Zone industrielle de Bonabéri' })).json()).id;
+        const [storing, closing] = await Promise.all([enable(lastSite, 'storage', ownerAccess), siteAction(lastSite, lastSiteId, 'deactivate', adminAccess)]);
+        assert.ok((storing.status === 200 && closing.status === 409) || (storing.status === 400 && closing.status === 200), `round ${round}: the last site against storage: ${storing.status}/${closing.status}`);
+        const storage = await agencyPool.query("SELECT (SELECT kind FROM agency_capability_transitions WHERE agency_id = $1 AND type = 'storage' ORDER BY sequence DESC LIMIT 1) AS kind, (SELECT count(*)::int FROM agency_sites WHERE agency_id = $1 AND deactivated_at IS NULL) AS sites", [lastSite]);
+        assert.ok(!(storage.rows[0].kind === 'activated' && storage.rows[0].sites === 0), `round ${round}: storage is never active without a site`);
+      }
+
+      // Audit: one row per effective action, names and types only.
+      const trail = await configAudit(capsAgency);
+      assert.deepEqual(trail.filter(entry => entry.action === 'agency.capability_enabled' || entry.action === 'agency.capability_suspended').slice(0, 3).map(entry => [entry.action, entry.user_id, entry.details]), [
+        ['agency.capability_enabled', adminUser, { fields: ['delivery'] }],
+        ['agency.capability_enabled', account.id, { fields: ['storage'] }],
+        ['agency.capability_suspended', account.id, { fields: ['storage'] }],
+      ]);
+      const everyTrace = JSON.stringify([...await configAudit(zonesAgency), ...await configAudit(sitesAgency), ...trail]);
+      for (const secret of ['Inventaire annuel', 'Douala', 'Akwa', 'Rue Joss', '+237677123456', 'Bonabéri', 'Agence']) assert.ok(!everyTrace.includes(secret), `the audit never holds "${secret}"`);
+      const zoneTrail = (await configAudit(zonesAgency)).map(entry => entry.action);
+      assert.equal(zoneTrail.filter(action => action === 'agency.zone_added').length, 6, 'every accepted zone is audited once');
+      assert.equal(zoneTrail.filter(action => action === 'agency.zone_retired').length, 1);
+      assert.equal(zoneTrail.filter(action => action === 'agency.zone_reactivated').length, 1);
+      const siteTrail = (await configAudit(sitesAgency)).map(entry => entry.action);
+      assert.deepEqual(['agency.site_created', 'agency.site_updated', 'agency.site_deactivated', 'agency.site_reactivated'].map(action => siteTrail.filter(item => item === action).length), [5, 2, 2, 1], 'creations, updates, deactivations and reactivations of the sites agency');
+      }
     } finally { await agencyPool.end(); }
     const me = (token) => fetch('http://127.0.0.1:3107/api/v1/me', { headers: { authorization: `Bearer ${token}` } });
     const profile = await me(tokens.accessToken);
@@ -451,9 +852,13 @@ const { Client } = require('pg');
     try {
       const audit = await auditPool.query("SELECT count(*)::int AS total FROM identity_audit WHERE user_id = $1 AND action = 'session.login'", [account.id]);
       assert.equal(audit.rows[0].total, 1);
-      const actions = await auditPool.query('SELECT action, count(*)::int AS total FROM identity_audit GROUP BY action ORDER BY action');
-      assert.deepEqual(Object.fromEntries(actions.rows.map(row => [row.action, row.total])), {
-        'agency.created': 8, 'agency.identity_updated': 6, 'agency.profile_updated': 7, 'invitation.accepted': 2, 'invitation.created': 4, 'membership.removed': 1, 'membership.role_changed': 1,
+      // The configuration actions (zones, sites, capabilities) are counted against their own agencies above.
+      const actions = await auditPool.query("SELECT action, count(*)::int AS total FROM identity_audit WHERE action !~ '^agency\\.(zone|site|capability)_' GROUP BY action ORDER BY action");
+      const { 'agency.identity_updated': identityEdits, 'agency.profile_updated': profileEdits, ...otherActions } = Object.fromEntries(actions.rows.map(row => [row.action, row.total]));
+      assert.equal(identityEdits + profileEdits, 13, 'one audit row per effective identity or profile edit');
+      assert.ok(identityEdits === 5 || identityEdits === 6, 'the identity and profile edits racing on one version: either one may have won');
+      assert.deepEqual(otherActions, {
+        'agency.created': 8, 'invitation.accepted': 2, 'invitation.created': 4, 'membership.removed': 1, 'membership.role_changed': 1,
         'session.login': 2, 'session.logout': 1, 'session.refresh': 1, 'user.registered': 1,
       }, 'every successful change is audited exactly once');
       const acceptedAudit = await auditPool.query("SELECT user_id, agency_id, subject_user_id FROM identity_audit WHERE action = 'invitation.accepted' AND agency_id = $1", [httpAgency]);
@@ -475,7 +880,8 @@ const { Client } = require('pg');
     assert.ok(spec.paths['/api/v1/auth/logout']);
     assert.ok(spec.paths['/api/v1/me']);
     assert.deepEqual(Object.keys(spec.paths).sort(), [
-      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agency-invitations/accept',
+      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
+      '/api/v1/agency-invitations/accept',
       '/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/auth/refresh', '/api/v1/auth/register',
       '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies',
     ], 'public route set is the documented one');

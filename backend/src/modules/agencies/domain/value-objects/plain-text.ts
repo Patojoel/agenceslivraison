@@ -30,6 +30,11 @@ export function singleLine(raw: string, field: string, min: number, max: number)
   return checked(raw.replace(/\s+/g, ' ').trim(), raw, field, min, max);
 }
 
+/** What makes two names "the same": case, accents and spacing are ignored (the text is already a single line). */
+export function comparisonKey(singleLineText: string): string {
+  return singleLineText.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
 /** Several lines allowed; edge spaces removed, nothing else rewritten. */
 export function multiLine(raw: string, field: string, min: number, max: number): string {
   return checked(raw.trim(), raw, field, min, max);

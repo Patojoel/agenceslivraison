@@ -1,6 +1,6 @@
-# Agences et onboarding — tranches 1 et 2 implémentées
+# Agences et onboarding — tranches 1 à 3 implémentées
 
-Cinq routes sont disponibles : la création d'un brouillon (B2.1), l'état d'onboarding (B2.9), la lecture d'une agence, la complétion de l'identité (B2.2) et la modification du profil (B2.6). Les zones, les capacités, les sites et la soumission arrivent dans les tranches suivantes du lot B2 ; ne pas supposer leurs champs. Toutes les routes demandent `Authorization: Bearer <accessToken>` et répondent avec `Cache-Control: no-store`. Les erreurs utilisent Problem Details (voir [conventions](../conventions.md)).
+Quinze routes sont disponibles : la création d'un brouillon (B2.1), l'état d'onboarding (B2.9), la lecture d'une agence, la complétion de l'identité (B2.2), la modification du profil (B2.6), les zones desservies (B2.3), les sites (B2.8) et l'activation et la suspension des capacités (B2.4, B2.7). La soumission arrive dans la tranche suivante du lot B2 ; ne pas supposer ses champs. Toutes les routes demandent `Authorization: Bearer <accessToken>` et répondent avec `Cache-Control: no-store`. Les erreurs utilisent Problem Details (voir [conventions](../conventions.md)).
 
 ## Créer un brouillon d'agence
 
@@ -74,9 +74,9 @@ Réponse **200** :
 | `submission` | `null` pour un brouillon ; `{ "submittedAt": "date ISO 8601", "submittedBy": "uuid" }` pour une agence soumise. |
 | `prerequisites` | Les six prérequis de soumission, toujours dans cet ordre, avec `filled` vrai ou faux. Les valeurs de l'identité ne sont jamais renvoyées. Règle provisoire (D-04) : raison sociale, ville et adresse du siège, téléphone principal, une capacité active, un site actif. |
 | `readyForSubmission` | Vrai seulement pour un brouillon dont tous les prérequis sont remplis. Toujours faux pour une agence soumise. |
-| `capabilities` | Capacités de l'agence : `{ "type": "delivery" \| "storage", "state": "active" \| "suspended", "since": "date ISO 8601", "reason": "texte" \| null, "acceptsNewRequests": booléen }`. Vide tant que l'activation des capacités n'est pas livrée. |
+| `capabilities` | Les capacités déjà activées au moins une fois, dans l'ordre `delivery`, `storage` : `{ "type": "delivery" \| "storage", "state": "active" \| "suspended", "since": "date ISO 8601 de la dernière transition", "reason": "motif de la suspension" \| null, "acceptsNewRequests": booléen }`. Une capacité jamais activée est absente. `acceptsNewRequests` est faux dès qu'elle est suspendue (le blocage effectif des demandes est vérifié au lot 4). |
 | `hybrid` | Vrai si la livraison et le stockage sont tous deux actifs. |
-| `activeZones`, `activeSites` | Nombres de zones desservies et de sites actifs. Valent 0 tant que ces fonctions ne sont pas livrées. |
+| `activeZones`, `activeSites` | Nombres de zones desservies actives et de sites actifs. Les prérequis `active_capability` et `active_site` en sont dérivés. |
 
 Aucun champ ne dit qu'une agence est « vérifiée », « certifiée » ou « assurée » : une agence soumise est seulement « soumise à vérification ».
 
@@ -170,3 +170,143 @@ Audit `agency.profile_updated` (noms de champs seulement). Le profil reste modif
 | non-membre, ancien membre, autre agence, agence inconnue | 404 | 404 (même réponse) |
 
 L'agence visée vient du chemin et n'est jamais lue dans le corps ; le membership est vérifié sous le verrou de la ligne de l'agence.
+
+## Zones desservies
+
+Une zone est une ville (2 à 80 caractères) et, facultativement, un quartier (2 à 80 caractères) ; sans quartier, elle couvre toute la ville. Le texte est libre, débarrassé des espaces de bord et des espaces multiples ; les caractères de contrôle sont refusés. Deux zones **actives** d'une agence ne peuvent pas être égales, sans tenir compte de la casse, des accents ni des espaces (`Douala / Akwa`, `douala / AKWA` et `Douala / Akwá` sont la même zone). Une agence dessert au plus **100 zones actives**. Zones, sites et capacités se gèrent en brouillon comme après la soumission, et ne changent pas la version de l'agence.
+
+La zone desservie est **la même zone** que celle des grilles tarifaires du lot 3 (décision D-15) : son `id` est durable. Une zone n'est jamais supprimée : elle est **retirée** (`status: "retired"`, avec sa date), et l'ajouter de nouveau la réactive avec le même `id`.
+
+Objet zone, renvoyé par les trois routes :
+
+```json
+{ "id": "uuid", "city": "Douala", "district": "Akwa", "status": "active", "addedAt": "date ISO 8601", "retiredAt": null }
+```
+
+### Ajouter une zone
+
+`POST /api/v1/agencies/{agencyId}/zones` — propriétaire ou administrateur. Corps (aucun autre champ n'est accepté) :
+
+```json
+{ "city": "Douala", "district": "Akwa" }
+```
+
+`district` est facultatif (`null` ou absent : toute la ville). Réponse **201** : la zone, active. Ajouter une zone retirée renvoie 201 avec la zone d'origine, réactivée (même `id`).
+
+| Statut | Cas |
+| --- | --- |
+| 201 | Zone ajoutée ou réactivée. |
+| 400 | Champ inconnu, type incorrect, ville ou quartier hors bornes, `agencyId` non UUID. |
+| 401 | Jeton absent, invalide ou session révoquée. |
+| 403 | Le membre est un agent. |
+| 404 | Agence inconnue, ou personne sans membership actif (même réponse). |
+| 409 | `code: "ZONE_ALREADY_SERVED"` (zone active identique) ou `code: "ZONE_LIMIT_REACHED"` (100 zones actives ; la réactivation compte comme un ajout). |
+
+### Retirer une zone
+
+`DELETE /api/v1/agencies/{agencyId}/zones/{zoneId}` — propriétaire ou administrateur. Retrait **logique** : la zone reste listée avec `status: "retired"` et `retiredAt`. Réponse **200** : la zone retirée.
+
+| Statut | Cas |
+| --- | --- |
+| 200 | Zone retirée. |
+| 400 | `agencyId` ou `zoneId` non UUID. |
+| 401, 403 | Comme ci-dessus. |
+| 404 | Agence inconnue ou sans accès, **ou zone inconnue ou d'une autre agence** : même réponse. L'identifiant de zone n'est cherché que dans l'agence du chemin. |
+| 409 | `code: "ZONE_ALREADY_RETIRED"`, ou `code: "LAST_ACTIVE_ZONE"` : c'est la dernière zone active et la livraison est active (suspendre la livraison ou ajouter une autre zone d'abord). Livraison inactive ou suspendue : le retrait est accepté. |
+
+### Lister les zones
+
+`GET /api/v1/agencies/{agencyId}/zones?limit=20&cursor=<nextCursor>` — **tout membre actif** (dont l'agent). Zones actives d'abord, puis retirées, chacune par ville, quartier puis identifiant. `limit` de 1 à 100 (20 par défaut), hors bornes : 400. `cursor` est le `nextCursor` de la page précédente (un UUID), sinon 400.
+
+```json
+{ "items": [ { "id": "uuid", "city": "Douala", "district": "Akwa", "status": "active", "addedAt": "…", "retiredAt": null } ], "nextCursor": "uuid" | null, "hasMore": true }
+```
+
+Non-membre, ancien membre, autre agence ou agence inconnue : même **404**.
+
+## Sites
+
+Un site a un nom (2 à 120 caractères, unique parmi les sites **actifs** de l'agence, sans tenir compte de la casse, des accents ni des espaces), une ville (2 à 80), une adresse (5 à 300) et un téléphone facultatif (mêmes règles que le téléphone principal : `+237` puis 9 chiffres commençant par 2 ou 6, espaces tolérés). Il porte sa **propre version**, distincte de celle de l'agence, et un statut `active` ou `inactive`. Un site n'est jamais supprimé.
+
+Objet site :
+
+```json
+{ "id": "uuid", "name": "Agence Akwa", "city": "Douala", "address": "Rue Joss, face Total Akwa", "phone": "+237677123456", "status": "active", "createdAt": "…", "deactivatedAt": null, "version": 1 }
+```
+
+Les routes qui renvoient un site posent son `version` dans l'en-tête `ETag` (`"2"`), à renvoyer dans `If-Match` pour le modifier.
+
+| Route | Rôles | Effet |
+| --- | --- | --- |
+| `POST /api/v1/agencies/{agencyId}/sites` | propriétaire, administrateur | Crée un site actif (version 1). Corps : `name`, `city`, `address` obligatoires, `phone` facultatif ; aucun autre champ. **201.** |
+| `PATCH /api/v1/agencies/{agencyId}/sites/{siteId}` | propriétaire, administrateur | Modification **partielle** d'un site actif, avec `If-Match` = version du site (428 absent, 400 mal formé, 409 `STALE_SITE_VERSION` périmé). `name`, `city`, `address` ne se vident pas ; `phone: null` (ou texte vide) l'efface. Une demande sans changement réel réussit avec la version inchangée. **200.** |
+| `POST /api/v1/agencies/{agencyId}/sites/{siteId}/deactivate` | propriétaire, administrateur | Désactive le site (conservé avec `deactivatedAt`). Sans corps. **200.** |
+| `POST /api/v1/agencies/{agencyId}/sites/{siteId}/reactivate` | propriétaire, administrateur | Réactive un site désactivé. Sans corps. **200.** |
+| `GET /api/v1/agencies/{agencyId}/sites?limit=20&cursor=…` | **tout membre actif** | Sites actifs d'abord, puis désactivés, par nom puis identifiant ; même pagination que les zones. |
+
+| Statut | Cas |
+| --- | --- |
+| 400 | Champ inconnu ou invalide, `If-Match` mal formé, `limit` ou `cursor` invalide, identifiant non UUID. |
+| 401, 403 | Comme pour les zones (agent : 403 sur toute écriture). |
+| 404 | Agence inconnue ou sans accès, **ou site inconnu ou d'une autre agence** : même réponse. |
+| 409 | `SITE_NAME_TAKEN` (création, renommage, ou réactivation alors qu'un site actif porte le nom), `SITE_DEACTIVATED` (modifier ou désactiver un site désactivé), `SITE_ALREADY_ACTIVE` (réactiver un site actif), `LAST_ACTIVE_SITE` (dernier site actif alors que le stockage est actif), `STALE_SITE_VERSION`. |
+| 428 | `If-Match` absent (PATCH). |
+
+## Activer et suspendre une capacité
+
+Deux capacités existent : `delivery` (livraison) et `storage` (stockage). Une agence qui a les deux actives est **hybride** (`hybrid`, état dérivé). `{type}` vaut `delivery` ou `storage` ; toute autre valeur : 400.
+
+Cycle de vie : *jamais activée* → `active` → `suspended` → `active`… L'historique complet (dates, auteurs, motifs) est conservé ; la réponse et l'état d'onboarding donnent l'état courant.
+
+Réponse **200** des deux routes (les capacités déjà activées au moins une fois, dans l'ordre `delivery`, `storage`) :
+
+```json
+{ "capabilities": [ { "type": "delivery", "state": "active", "since": "date ISO 8601", "reason": null, "acceptsNewRequests": true } ], "hybrid": false }
+```
+
+### Activer
+
+`POST /api/v1/agencies/{agencyId}/capabilities/{type}/activate` — propriétaire ou administrateur, sans corps (un corps non vide est refusé : 400). Sert aussi à **réactiver** une capacité suspendue, sous les mêmes conditions.
+
+Configuration minimale (décision D-04) : **livraison** = au moins une zone active ; **stockage** = au moins un site actif.
+
+| Statut | Cas |
+| --- | --- |
+| 200 | Capacité active. |
+| 400 | `{type}` inconnu, corps non vide, `agencyId` non UUID ; ou `code: "CAPABILITY_PREREQUISITE_MISSING"` : le champ `missing` du Problem Details nomme ce qui manque (`["active_zone"]` ou `["active_site"]`). |
+| 401, 403, 404 | Comme pour les zones. |
+| 409 | `code: "CAPABILITY_ALREADY_ACTIVE"`. Aucun second effet, aucune seconde trace d'audit. |
+
+### Suspendre
+
+`POST /api/v1/agencies/{agencyId}/capabilities/{type}/suspend` — propriétaire ou administrateur. Corps (aucun autre champ) :
+
+```json
+{ "reason": "Inventaire annuel" }
+```
+
+`reason` : 3 à 500 caractères de texte brut, obligatoire. Une capacité suspendue n'accepte plus de nouvelles demandes (`acceptsNewRequests: false`) ; les demandes et commandes déjà acceptées ne sont pas concernées. Suspendre la dernière capacité active est permis et ne change pas le statut de l'agence.
+
+| Statut | Cas |
+| --- | --- |
+| 200 | Capacité suspendue. |
+| 400 | `{type}` inconnu, motif absent ou hors bornes, champ inconnu. |
+| 401, 403, 404 | Comme pour les zones. |
+| 409 | `code: "CAPABILITY_NOT_ACTIVE"` : déjà suspendue, ou jamais activée. Aucun second effet. |
+
+### Invariants croisés
+
+- Tant que la **livraison est active**, la dernière zone active ne peut pas être retirée (409 `LAST_ACTIVE_ZONE`).
+- Tant que le **stockage est actif**, le dernier site actif ne peut pas être désactivé (409 `LAST_ACTIVE_SITE`).
+- Suspendue, la capacité ne protège plus rien ; la réactiver revérifie la configuration minimale.
+- Ces règles tiennent en concurrence : toutes les écritures de configuration d'une agence passent par le verrou de la ligne `agencies`, et la base garde des index uniques partiels (zones actives, noms de sites actifs) et la clé `(agence, capacité, numéro de transition)`. Deux activations simultanées ne produisent qu'une activation ; un retrait de la dernière zone et l'activation de la livraison simultanés : l'un des deux est refusé, jamais livraison active sans zone.
+
+### Droits et audit
+
+| Rôle dans l'agence | Lire zones, sites, état | Écrire zones, sites, capacités |
+| --- | --- | --- |
+| `owner`, `admin` | oui | oui |
+| `agent` | oui | 403 |
+| non-membre, ancien membre, autre agence, agence inconnue | 404 | 404 (même réponse) |
+
+L'agence visée vient du chemin, jamais du corps. Chaque action effective écrit une trace d'audit dans la même transaction (`agency.zone_added`, `agency.zone_reactivated`, `agency.zone_retired`, `agency.site_created`, `agency.site_updated`, `agency.site_deactivated`, `agency.site_reactivated`, `agency.capability_enabled`, `agency.capability_suspended`), avec des **noms** de champs ou de capacités seulement (`details.fields`), jamais de villes, d'adresses, de téléphones ni de motifs. Un refus (conflit, droit, donnée invalide) et une modification sans effet réel n'écrivent rien.

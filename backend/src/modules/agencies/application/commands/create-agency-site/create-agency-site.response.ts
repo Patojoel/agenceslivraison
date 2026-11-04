@@ -1,0 +1,3 @@
+import { AgencySiteReadModel } from '../../read-models/agency-site.read-model';
+
+export type CreateAgencySiteResponse = AgencySiteReadModel;

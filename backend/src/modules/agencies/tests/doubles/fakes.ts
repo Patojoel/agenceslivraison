@@ -7,6 +7,10 @@ import { Agency } from '../../domain/agency';
 import { AgencyRole } from '../../domain/agency-role';
 import { AgencySnapshot, AgencyStatus } from '../../domain/agency.snapshot';
 import { EMPTY_IDENTITY } from '../../domain/agency-identity';
+import { siteDetailsOf } from '../../domain/agency-site';
+import { AgencySiteId } from '../../domain/value-objects/agency-site-id';
+import { ServiceArea } from '../../domain/value-objects/service-area';
+import { ServiceZoneId } from '../../domain/value-objects/service-zone-id';
 import { TradeName } from '../../domain/value-objects/trade-name';
 import { AgencyTeam, Membership } from '../../domain/agency-team';
 import { Invitation } from '../../domain/invitation';
@@ -36,8 +40,22 @@ export function team(...memberships: Membership[]): AgencyTeam {
 export function anAgency(status: AgencyStatus = 'draft', version = 1, id = AGENCY): Agency {
   return Agency.reconstitute({
     id: AgencyId.of(id), tradeName: TradeName.of('Express Douala'), description: null, identity: EMPTY_IDENTITY,
-    status, version, createdBy: UserId.of(OWNER.user), createdAt: T0,
+    status, version, createdBy: UserId.of(OWNER.user), createdAt: T0, zones: [], sites: [], capabilityTransitions: [],
   });
+}
+
+/** The agency with an active service zone, added by the owner at `T0`. */
+export function withActiveZone(agency: Agency, n: number, city: string, district: string | null = null): Agency {
+  agency.addZone(ServiceZoneId.of(uuid(500 + n)), ServiceArea.of(city, district), UserId.of(OWNER.user), T0);
+  agency.pullEvents();
+  return agency;
+}
+
+/** The agency with an active site, created by the owner at `T0`. */
+export function withActiveSite(agency: Agency, n: number, name: string): Agency {
+  agency.createSite(AgencySiteId.of(uuid(600 + n)), siteDetailsOf({ name, city: 'Douala', address: 'Rue Joss, Akwa', phone: null }), UserId.of(OWNER.user), T0);
+  agency.pullEvents();
+  return agency;
 }
 
 export class InMemoryAgencyRepository implements AgencyRepository {

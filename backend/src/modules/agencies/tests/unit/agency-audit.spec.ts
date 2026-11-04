@@ -43,3 +43,33 @@ test('identity and profile updates are audited with the names of the changed fie
     { userId: uuid(2), action: 'agency.profile_updated', agencyId: uuid(10), details: { fields: ['description'] } },
   ]);
 });
+
+test('zone, site and capability events are audited by action, with names or types only', async () => {
+  const audit = new InMemoryAuditLog();
+  const subscriber = new AgencyAuditSubscriber(audit);
+  const events: AgencyEvent[] = [
+    { type: 'ServiceZoneAdded', agencyId: uuid(10), actorId: uuid(2), zoneId: uuid(501), reactivated: false },
+    { type: 'ServiceZoneAdded', agencyId: uuid(10), actorId: uuid(2), zoneId: uuid(501), reactivated: true },
+    { type: 'ServiceZoneRetired', agencyId: uuid(10), actorId: uuid(2), zoneId: uuid(501) },
+    { type: 'AgencySiteCreated', agencyId: uuid(10), actorId: uuid(2), siteId: uuid(601) },
+    { type: 'AgencySiteUpdated', agencyId: uuid(10), actorId: uuid(2), siteId: uuid(601), fields: ['address', 'phone'] },
+    { type: 'AgencySiteDeactivated', agencyId: uuid(10), actorId: uuid(2), siteId: uuid(601) },
+    { type: 'AgencySiteReactivated', agencyId: uuid(10), actorId: uuid(2), siteId: uuid(601) },
+    { type: 'AgencyCapabilityEnabled', agencyId: uuid(10), actorId: uuid(2), capability: 'delivery' },
+    { type: 'AgencyCapabilitySuspended', agencyId: uuid(10), actorId: uuid(2), capability: 'storage' },
+  ];
+  for (const event of events) await subscriber.handle(event);
+  const agencyId = uuid(10);
+  const userId = uuid(2);
+  assert.deepEqual(audit.entries, [
+    { userId, action: 'agency.zone_added', agencyId },
+    { userId, action: 'agency.zone_reactivated', agencyId },
+    { userId, action: 'agency.zone_retired', agencyId },
+    { userId, action: 'agency.site_created', agencyId },
+    { userId, action: 'agency.site_updated', agencyId, details: { fields: ['address', 'phone'] } },
+    { userId, action: 'agency.site_deactivated', agencyId },
+    { userId, action: 'agency.site_reactivated', agencyId },
+    { userId, action: 'agency.capability_enabled', agencyId, details: { fields: ['delivery'] } },
+    { userId, action: 'agency.capability_suspended', agencyId, details: { fields: ['storage'] } },
+  ]);
+});

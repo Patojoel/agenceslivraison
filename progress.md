@@ -18,10 +18,10 @@ Tableau de bord vivant du projet. Le détail de chaque tâche (règles, endpoint
 
 | Élément | Valeur |
 |---|---|
-| Lot backend courant | B2 — Onboarding agence (tranches 1 et 2 faites, tranche 3 sur 4 en cours) |
+| Lot backend courant | B2 — Onboarding agence (tranches 1 à 3 faites, tranche 4 sur 4 en cours) |
 | Branche | `refactor/architecture-normalisee` |
 | Mode de session | light (session du 2026-11-03) |
-| Tâches en cours | `[~]` B2 tranche 3 — B2.3 zones + B2.8 sites + B2.4 / B2.7 capacités (`back-builder`) |
+| Tâches en cours | `[~]` B2 tranche 4 — B2.5 soumission + B2.10 liste des membres (`back-builder`) |
 
 ### Refactor architecture + TypeORM — commité (2026-11-03)
 Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranchée en faveur de TypeORM et de l'architecture normalisée. `CLAUDE.md`, les agents (`back-builder`, `archi-reviewer`, `query-perf`), `phases.md` et `backend/docs/` sont alignés. Décision et conventions : [docs/architecture/](docs/architecture/).
@@ -34,7 +34,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 |---|---|---|---|
 | B0 | Socle technique | terminé (sauvegarde à valider en cible) | 11/12 |
 | B1 | Identité, sessions, memberships | terminé, re-vérifié après refactor (rate limit partagé et constats de revue B1.13–B1.14 à traiter) | 11/14 |
-| B2 | Onboarding agence | tranches 1 et 2 sur 4 faites ; revue sécurité en fin de lot | 4/10 |
+| B2 | Onboarding agence | tranches 1 à 3 sur 4 faites ; revue sécurité en fin de lot | 8/10 |
 | B3 | Tarifs, zones, marketplace publique | à faire | 0/13 |
 | B4 | Clients, commerçants, demandes | à faire | 0/14 |
 | B5 | Commandes, colis, suivi | à faire | 0/17 |
@@ -93,16 +93,16 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 > État B0/B1 relevé dans `backend/docs/` et le code au 2026-11-03, puis re-vérifié après le refactor `293a35b` : tous les parcours B1 sont couverts par `test/e2e.cjs`, passé dans Docker le 2026-11-03.
 
 ### B2 — Onboarding agence (CRITIQUE)
-Étapes : [x] S1 use cases (9 UC, 111 scénarios, 112 tests prévus) · [x] S2 plan validé (2026-11-04, 4 tranches : 1) B2.1+B2.9, 2) B2.2+B2.6, 3) B2.3+B2.8+B2.4+B2.7, 4) B2.5+B2.10) · [~] S3 domaine · [~] S4 application · [~] S5 persistance · [~] S6 HTTP · [~] S7 E2E · [~] S8 docs (faits pour les tranches 1 et 2 sur 4) · [ ] S9 revues · [ ] S10 clôture
+Étapes : [x] S1 use cases (9 UC, 111 scénarios, 112 tests prévus) · [x] S2 plan validé (2026-11-04, 4 tranches : 1) B2.1+B2.9, 2) B2.2+B2.6, 3) B2.3+B2.8+B2.4+B2.7, 4) B2.5+B2.10) · [~] S3 domaine · [~] S4 application · [~] S5 persistance · [~] S6 HTTP · [~] S7 E2E · [~] S8 docs (faits pour les tranches 1 à 3 sur 4) · [ ] S9 revues · [ ] S10 clôture
 - [x] B2.1 Créer brouillon + premier propriétaire — `POST /agencies`, agence + équipe dans une transaction, `Idempotency-Key` (rejeu, conflit, concurrence testés)
 - [x] B2.2 Compléter l'identité — `PATCH /agencies/{id}/identity` (brouillon seulement, `If-Match`, 428 / 409) ; lecture ajoutée hors plan : `GET /agencies/{id}` (version, `ETag`)
-- [ ] B2.3 Zones desservies
-- [ ] B2.4 Activer capacité livraison / stockage
+- [x] B2.3 Zones desservies — `POST|DELETE|GET /agencies/{id}/zones` (retrait logique, réactivation avec le même id, 100 actives max, table `service_zones` réutilisable par B3 via `(agency_id, id)` — D-15)
+- [x] B2.4 Activer capacité livraison / stockage — `POST …/capabilities/{type}/activate` (configuration minimale, 409 sur second envoi, historique en ajout seul)
 - [ ] B2.5 Soumettre à vérification
 - [x] B2.6 Modifier le profil — `PATCH /agencies/{id}/profile` (brouillon ou soumise, `If-Match`)
-- [ ] B2.7 Suspendre une capacité
-- [ ] B2.8 Gérer les sites
-- [x] B2.9 État d'onboarding — `GET /agencies/{id}/onboarding`, 404 uniforme hors membres actifs ; capacités, zones et sites renvoyés vides ou à 0 jusqu'aux tranches 3 et 4
+- [x] B2.7 Suspendre une capacité — `POST …/capabilities/{type}/suspend` (motif 3–500, 409 sur second envoi)
+- [x] B2.8 Gérer les sites — création, modification (`If-Match` sur la version du site), désactivation, réactivation, liste
+- [x] B2.9 État d'onboarding — `GET /agencies/{id}/onboarding`, 404 uniforme hors membres actifs ; capacités, `hybrid`, zones et sites actifs réels depuis la tranche 3
 - [ ] B2.10 *(ajoutée le 2026-11-04, anomalie A-09)* Lister les membres d'une agence — nécessaire à F1.3 ; rattachement B2 à confirmer
 
 ### B3 — Tarifs, zones, marketplace publique (CRITIQUE)
@@ -348,6 +348,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | D-09 | Responsabilité inter-agences, SLA, politique d'écart et de retours | B8, B9 | ouverte |
 | D-10 | Responsables de validation et critères de certification des agences | B10 | ouverte |
 | D-11 | Rétention et calendrier des sauvegardes | B0.11, B10.20 | ouverte |
+| D-17 | Configuration minimale absente à l'activation d'une capacité : 400 `CAPABILITY_PREREQUISITE_MISSING` avec `missing` (choix du use case UC-02-04, implémenté) ou 409 ? Historique des motifs de suspension lisible ailleurs que dans l'état d'onboarding ? | B2.4, B2.7 | à confirmer |
 | D-16 | Rétention des clés d'idempotence (`idempotency_keys`) | B10.21 | ouverte |
 | D-12 | Détecter une migration TypeORM modifiée après application (empreinte par migration) ; afficher ou non au migrateur le motif d'un refus d'adoption Drizzle (message sans donnée) | B10.18 | ouverte |
 
@@ -366,6 +367,7 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2 tranche 3 — B2.3 + B2.8 + B2.4 + B2.7 | Vert ; 10 routes (zones ×3, sites ×5, capacités ×2), état d'onboarding enrichi sans changement de contrat ; migration `1793783458220-agency-zones-sites-capabilities` (3 tables, index uniques partiels, 17 CHECK, clé de séquence des capacités) ; D-15 appliquée ; `DomainException` étendue (`code`, `missing`) ; rouges constatés en unitaire et en E2E ; concurrence testée (double activation, double suspension, doublons, dernière zone / dernier site) ; assertion d'audit de la tranche 2 rendue indépendante du gagnant d'une course ; D-17 ouverte | `npm run lint` OK · `npm run typecheck` OK · `npm test` 200/200 (relancé par la session principale) · `npm run build` OK · `migration:check` « No changes » · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2 tranche 2 — B2.2 + B2.6 | Vert ; 3 routes (`GET /agencies/{id}` ajoutée hors plan, `PATCH …/identity`, `PATCH …/profile`) ; migration `1793781805488-agency-identity-and-profile` (colonnes d'identité, 8 CHECK, `identity_audit.details` avec noms de champs uniquement) ; `If-Match` (428 absent, 400 mal formé, 409 périmé) ; rouges constatés en unitaire **et** en E2E (E2E écrite avant la présentation) ; `TradeName` refuse désormais les caractères de contrôle (NUL : 500 → 400) | `npm run lint` OK · `npm run typecheck` OK · `npm test` 128/128 (relancé par la session principale) · `npm run build` OK · `migration:check` « No changes » · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2 tranche 1 — B2.1 + B2.9 | Vert ; migration `1793777474207-agency-draft-and-idempotency` (colonnes d'agence, `idempotency_keys`, agences existantes nommées et rattachées à leur propriétaire) ; défaut latent de B0 corrigé : migrateur et `/health/ready` comparaient les migrations dans l'ordre de découverte des fichiers, pas par horodatage (`orderedMigrationNames`, test rouge puis vert) ; rouges constatés au niveau unitaire, pas en E2E ; tâche B10.21 et décision D-16 ajoutées | `npm run lint` OK · `npm run typecheck` OK · `npm test` 80/80 (relancé par la session principale) · `npm run build` OK · `migration:check` « No changes » (base migrée avec données et base neuve) · E2E Docker OK (concurrence de clé incluse) · `npm audit --omit=dev` 0 |
 | 2026-11-04 | user + session principale | B2.S2 — plan du lot validé | 4 tranches ; trois propositions par défaut retenues (questions mineures, `If-Match`, B2.10 inclus) | aucune |

@@ -1,7 +1,8 @@
 import { AgencyStatus } from '../../domain/agency.snapshot';
+import { CapabilityType } from '../../domain/capability';
 
 export interface CapabilityStateReadModel {
-  readonly type: 'delivery' | 'storage';
+  readonly type: CapabilityType;
   readonly state: 'active' | 'suspended';
   readonly since: string;
   readonly reason: string | null;

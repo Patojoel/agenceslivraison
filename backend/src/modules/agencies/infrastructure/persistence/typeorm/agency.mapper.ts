@@ -11,7 +11,11 @@ import { Niu } from '../../../domain/value-objects/niu';
 import { PrimaryPhone } from '../../../domain/value-objects/primary-phone';
 import { Rccm } from '../../../domain/value-objects/rccm';
 import { TradeName } from '../../../domain/value-objects/trade-name';
+import { AgencyCapabilityTransitionOrmEntity } from './agency-capability-transition.orm-entity';
 import { AgencyOrmEntity } from './agency.orm-entity';
+import { AgencySiteOrmEntity } from './agency-site.orm-entity';
+import { AgencySiteMapper, CapabilityTransitionMapper, ServiceZoneMapper } from './agency-configuration.mapper';
+import { ServiceZoneOrmEntity } from './service-zone.orm-entity';
 
 function ofOptional<T>(stored: string | null, of: (value: string) => T): T | null {
   return stored === null ? null : of(stored);
@@ -48,7 +52,8 @@ export class AgencyMapper {
     };
   }
 
-  static toDomain(row: AgencyOrmEntity): Agency {
+  /** The rows of the zones, sites and capability transitions are those of the same agency, in the order of the transitions. */
+  static toDomain(row: AgencyOrmEntity, configuration: { readonly zones: readonly ServiceZoneOrmEntity[]; readonly sites: readonly AgencySiteOrmEntity[]; readonly transitions: readonly AgencyCapabilityTransitionOrmEntity[] }): Agency {
     if (!isAgencyStatus(row.status)) throw new Error('Unknown agency status in database');
     return Agency.reconstitute({
       id: AgencyId.of(row.id),
@@ -67,6 +72,9 @@ export class AgencyMapper {
       version: row.version,
       createdBy: UserId.of(row.createdBy),
       createdAt: row.createdAt,
+      zones: configuration.zones.map(ServiceZoneMapper.toDomain),
+      sites: configuration.sites.map(AgencySiteMapper.toDomain),
+      capabilityTransitions: configuration.transitions.map(CapabilityTransitionMapper.toDomain),
     });
   }
 }

@@ -12,6 +12,22 @@ function toAuditEntry(event: AgencyEvent): AuditEntry {
       return { userId: event.actorId, action: 'agency.identity_updated', agencyId: event.agencyId, details: { fields: event.fields } };
     case 'AgencyProfileUpdated':
       return { userId: event.actorId, action: 'agency.profile_updated', agencyId: event.agencyId, details: { fields: event.fields } };
+    case 'ServiceZoneAdded':
+      return { userId: event.actorId, action: event.reactivated ? 'agency.zone_reactivated' : 'agency.zone_added', agencyId: event.agencyId };
+    case 'ServiceZoneRetired':
+      return { userId: event.actorId, action: 'agency.zone_retired', agencyId: event.agencyId };
+    case 'AgencySiteCreated':
+      return { userId: event.actorId, action: 'agency.site_created', agencyId: event.agencyId };
+    case 'AgencySiteUpdated':
+      return { userId: event.actorId, action: 'agency.site_updated', agencyId: event.agencyId, details: { fields: event.fields } };
+    case 'AgencySiteDeactivated':
+      return { userId: event.actorId, action: 'agency.site_deactivated', agencyId: event.agencyId };
+    case 'AgencySiteReactivated':
+      return { userId: event.actorId, action: 'agency.site_reactivated', agencyId: event.agencyId };
+    case 'AgencyCapabilityEnabled':
+      return { userId: event.actorId, action: 'agency.capability_enabled', agencyId: event.agencyId, details: { fields: [event.capability] } };
+    case 'AgencyCapabilitySuspended':
+      return { userId: event.actorId, action: 'agency.capability_suspended', agencyId: event.agencyId, details: { fields: [event.capability] } };
     case 'InvitationIssued':
       return { userId: event.actorId, action: 'invitation.created', agencyId: event.agencyId };
     case 'InvitationAccepted':

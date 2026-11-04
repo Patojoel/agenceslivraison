@@ -6,11 +6,11 @@
 - Les réponses des endpoints de santé sont en JSON. Le démarrage local est décrit dans le [README backend](../README.md).
 - L'inscription et la connexion sont disponibles mais les autorisations métier ne sont pas encore implémentées. Ne pas construire de parcours connecté sur les routes envisagées et ne pas interpréter la présence d'une interface comme une permission serveur.
 - Tant que PostgreSQL ou les migrations ne sont pas prêts, toutes les routes sauf les sondes de santé répondent 503.
-- Les erreurs HTTP utilisent `application/problem+json` avec `type`, `title`, `status`, `detail`, `instance`, `code` et `traceId`. Les erreurs de champs ne sont pas encore implémentées.
+- Les erreurs HTTP utilisent `application/problem+json` avec `type`, `title`, `status`, `detail`, `instance`, `code` et `traceId`. Les erreurs de champs ne sont pas encore implémentées. `code` vaut `HTTP_ERROR` pour la plupart des 4xx ; certains refus métier portent un code stable que le client peut utiliser (`ZONE_ALREADY_SERVED`, `ZONE_LIMIT_REACHED`, `ZONE_ALREADY_RETIRED`, `LAST_ACTIVE_ZONE`, `SITE_NAME_TAKEN`, `SITE_DEACTIVATED`, `SITE_ALREADY_ACTIVE`, `LAST_ACTIVE_SITE`, `STALE_SITE_VERSION`, `CAPABILITY_ALREADY_ACTIVE`, `CAPABILITY_NOT_ACTIVE`, `CAPABILITY_PREREQUISITE_MISSING`). Ce dernier ajoute le champ `missing` (liste des éléments manquants, `active_zone` ou `active_site`). Les 404 n'ont jamais de code propre : un objet inconnu et un objet interdit se ressemblent.
 
 ## Concurrence optimiste : `ETag` et `If-Match`
 
-Une ressource versionnée (aujourd'hui l'agence) renvoie sa version dans l'en-tête `ETag` (`"3"`) et dans le corps (`version`) sur sa lecture et après chaque modification. Une modification doit renvoyer cette version dans `If-Match` :
+Une ressource versionnée (aujourd'hui l'agence, avec sa propre version, et chaque site d'une agence, avec la sienne) renvoie sa version dans l'en-tête `ETag` (`"3"`) et dans le corps (`version`) sur sa lecture et après chaque modification. Une modification doit renvoyer cette version dans `If-Match` :
 
 - formes acceptées : `"3"` ou `3` (un entier de 1 à 2 147 483 647, sans espace interne) ;
 - en-tête absent : **428** Precondition Required (Problem Details), rien n'est écrit ;
