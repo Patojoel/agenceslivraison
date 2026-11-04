@@ -2,7 +2,7 @@
 
 Tous les événements actuels sont des **événements de domaine synchrones**. Après la sauvegarde de l'agrégat, le handler les publie via `DomainEventPublisher`. `InProcessDomainEventPublisher` les transmet aux subscribers dans la transaction de la commande : un échec du subscriber annule toute la commande. Aucun événement d'intégration ni outbox n'existe encore.
 
-Le seul consommateur aujourd'hui est l'audit. `IdentityAuditSubscriber` et `AgencyAuditSubscriber` écrivent chacun une ligne dans `identity_audit` par événement. `occurred_at` prend l'heure de la base.
+Le seul consommateur aujourd'hui est l'audit. `IdentityAuditSubscriber`, `AgencyAuditSubscriber` et `PricingAuditSubscriber` écrivent chacun une ligne dans `identity_audit` par événement. `occurred_at` prend l'heure de la base.
 
 | Événement | Émetteur | Charge utile | Ligne d'audit (`action` · `user_id` · `agency_id` · `subject_user_id`) |
 | --- | --- | --- | --- |
@@ -23,6 +23,8 @@ Le seul consommateur aujourd'hui est l'audit. `IdentityAuditSubscriber` et `Agen
 | `AgencySiteReactivated` | `Agency.reactivateSite` | `agencyId`, `actorId`, `siteId` | `agency.site_reactivated` · actorId · agencyId · — · `resource_id = siteId` |
 | `AgencyCapabilityEnabled` | `Agency.enableCapability` (activation ou réactivation) | `agencyId`, `actorId`, `capability` (`delivery` ou `storage`) | `agency.capability_enabled` · actorId · agencyId · — · `details = { "fields": [capability] }` |
 | `AgencyCapabilitySuspended` | `Agency.suspendCapability` | `agencyId`, `actorId`, `capability` | `agency.capability_suspended` · actorId · agencyId · — · `details = { "fields": [capability] }` |
+| `RateCardCreated` | `RateCard.create` | `agencyId`, `rateCardId`, `actorId`, `version` (1) | `pricing.rate_card_created` · actorId · agencyId · — · `resource_id = rateCardId` · `details = { "fields": ["version:1"] }` (aucun prix, poids ni zone) |
+| `RateCardVersioned` | `RateCard.publish` (seulement si le barème change réellement) | `agencyId`, `rateCardId`, `actorId`, `version` (le nouveau numéro) | `pricing.rate_card_versioned` · actorId · agencyId · — · `resource_id = rateCardId` · `details = { "fields": ["version:N"] }` |
 | `InvitationIssued` | `Invitation.issue` | `agencyId`, `actorId` | `invitation.created` · actorId · agencyId · — |
 | `InvitationAccepted` | `Invitation.accept` | `agencyId`, `userId` | `invitation.accepted` · userId · agencyId · userId |
 | `MembershipRoleChanged` | `AgencyTeam.changeRole` | `agencyId`, `actorId`, `subjectUserId` | `membership.role_changed` · actorId · agencyId · subjectUserId |

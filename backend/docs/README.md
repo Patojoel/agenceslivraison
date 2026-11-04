@@ -7,6 +7,7 @@ Cette documentation aide à développer les interfaces `front-office`, `admin-ba
 | Santé et disponibilité | Implémenté | [Santé](routes/sante.md) |
 | Identité et accès | Inscription, sessions et accès agence disponibles | [Identité et accès](routes/identite-acces.md) |
 | Agences et onboarding | Création d'un brouillon et état d'onboarding disponibles ; reste du lot B2 prévu | [Agences et onboarding](routes/agences-onboarding.md) |
+| Tarifs | Grille de livraison (création, versions, historique) et simulation de prix disponibles ; devis prévus | [Tarifs](routes/tarifs.md) |
 | Marketplace | Prévu | [Groupes métier prévus](routes/groupes-prevus.md) |
 | Commandes, livraison et suivi | Prévu | [Groupes métier prévus](routes/groupes-prevus.md) |
 | Stockage, transferts et retours | Prévu | [Groupes métier prévus](routes/groupes-prevus.md) |

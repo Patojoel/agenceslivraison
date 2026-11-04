@@ -7,7 +7,7 @@ Ces préfixes sont issus du cadrage et ne sont pas encore disponibles. Ils serve
 | Agences et équipes | `/agencies`, `/agency-members`, `/agency-onboarding` | administration agence et plateforme |
 | Marketplace | `/public/agencies`, `/service-requests` | front-office et agence |
 | Clients et commerçants | `/customers`, `/merchants` | agence et commerçant |
-| Tarifs | `/pricing` | à définir |
+| Tarifs | `/pricing` | à définir (grille et simulation livrées sous `/agencies/{id}/rate-card` et `/agencies/{id}/quotes/preview`, voir [Tarifs](tarifs.md) ; les devis restent à livrer) |
 | Commandes et suivi | `/orders`, `/parcels`, `/tracking` | agence et clients autorisés |
 | Livraison | `/couriers`, `/delivery-tasks` | agence et livreur |
 | Stockage et préparation | `/warehouses`, `/inventory`, `/stock-reservations`, `/fulfillment` | agence et commerçant autorisé |

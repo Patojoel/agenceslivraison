@@ -79,3 +79,29 @@ Les neuf commandes de configuration suivent le protocole de `application/command
 ### Exception assumée : acceptation d'une invitation
 
 `accept-invitation` modifie deux agrégats dans une même transaction : l'`Invitation`, marquée acceptée, et l'`AgencyTeam`, qui reçoit le nouveau membership. Le contrat HTTP l'impose : une personne déjà membre doit recevoir un 409 immédiat et l'invitation doit rester utilisable. Une cohérence par événement après commit casserait ces deux garanties. Les verrous sont toujours pris dans le même ordre : l'invitation, puis l'agence.
+
+## Tarifs — `src/modules/pricing/`
+
+Grille tarifaire de livraison d'une agence (B3.4, B3.5, B3.6, B3.14 ; lot B3, tranche 2). Les devis et la fiche publique arrivent dans les tranches suivantes.
+
+| Agrégat | Invariants |
+| --- | --- |
+| `RateCard` | Une par agence (unique `agency_id`). Elle ne charge que la **version en vigueur** (les versions précédentes sont de l'historique, lu par le port de lecture) ; ses versions sont **immuables** et seulement ajoutées : numéro suivant, en vigueur aussitôt, auteur et date. Créer produit la version 1 ; publier exige le numéro de la version en vigueur (`STALE_RATE_CARD_VERSION` sinon) et un barème différent (identique : rien, pas d'événement). Les zones d'une version sont des zones **actives** de l'agence au moment de l'écriture (`ZoneDirectory` : inconnue ou d'une autre agence → 404, retirée → 409 `ZONE_RETIRED`). |
+| `RateCardContent` (valeur) | Le barème complet : de 1 à 100 zones, une ligne par zone, de 1 à 20 tranches par zone aux bornes strictement croissantes ; bornes en grammes (`Weight.bound`, unité explicite, au gramme, de 1 g à 1 000 kg), prix XAF entiers de 1 à 10 000 000 (`Price`), diviseur volumétrique facultatif de 1 000 à 10 000 (`VolumetricDivisor`). Lignes triées par zone : deux barèmes qui disent la même chose ont la même empreinte. |
+| `RateCardVersion` (valeur) | Porte le **calcul de prix**, unique pour la simulation et, plus tard, les devis : poids taxable = max(poids réel, poids volumétrique) arrondi au gramme supérieur, première tranche dont la borne est supérieure ou égale (borne incluse), « hors barème » au-delà (pas de total partiel), « aucun tarif » si la zone n'a pas de ligne, total = somme exacte. Arithmétique entière, aucun flottant sur les montants. |
+
+- **Commandes** : `create-rate-card`, `publish-rate-card-version`.
+- **Queries** : `get-rate-card`, `get-rate-card-version`, `list-rate-card-versions` (port de lecture `ReadRateCardRepository`, curseur = numéro de version), `preview-quote` (lecture pure : aucune écriture, aucun verrou).
+- **Événements** : `RateCardCreated`, `RateCardVersioned`, audités par `PricingAuditSubscriber` (voir [events.md](events.md)).
+- **Droits** : décidés dans `pricing` (`application/pricing-rights.ts`, `Record<AgencyRole, boolean>` exhaustifs, un test parcourt `AGENCY_ROLES`) : créer et versionner = propriétaire et administrateur ; lire et simuler = tout membre actif.
+- **Contrat HTTP** : [routes/tarifs.md](routes/tarifs.md).
+
+### Lecture d'agences : capacité exposée par `agencies`
+
+`pricing` ne lit aucune table de `agencies`. `AgenciesModule` exporte `AgencyAccessReader` (`application/queries/agency-access/`, port de lecture `ReadAgencyDeliveryRepository` et adaptateur TypeORM dans `agencies`) : le rôle actif d'un utilisateur dans une agence (`null` pour un ancien membre, un étranger ou une agence inconnue), l'état de livraison de l'agence (capacité de livraison active ou non, zones actives **et retirées** avec leur libellé) et la variante `deliveryStateOfLockedShared`, qui pose un verrou partagé `FOR SHARE` sur la ligne `agencies` pour le reste de la transaction. `pricing` le consomme derrière **son propre port** (`application/ports/agency-access.port.ts`, symbole `AGENCY_ACCESS`) et un adaptateur (`infrastructure/agencies/agencies-agency-access.ts`). Le type `AgencyRole` est importé du fichier `agency-role.ts` d'`agencies` (types seulement, aucune logique).
+
+Protocole d'une écriture (`application/require-role.ts`) : le rôle est contrôlé **sans verrou** (étranger : 404, agent : 403), puis la ligne de l'agence est verrouillée en partage, puis le rôle est décidé de nouveau. Le retrait d'une zone verrouille la même ligne en exclusif : publier une version et retirer une zone sont sérialisés, une version n'est jamais écrite pour une zone déjà retirée. Le versionnement verrouille ensuite la ligne `rate_cards` (`FOR UPDATE`) et compare le numéro de base ; la création est un `INSERT … ON CONFLICT (agency_id) DO NOTHING` (une ligne insérée, ou `RATE_CARD_ALREADY_EXISTS`).
+
+### Persistance et écart assumé : clé étrangère vers `service_zones`
+
+Tables `rate_cards` (une par agence, `current_version`), `rate_card_versions` (clé `(rate_card_id, number)`) et `rate_card_lines` (une ligne par tranche : zone, position, borne en grammes, prix). Chaque ligne porte son `agency_id` et toutes les clés étrangères sont composites avec l'agence : une version ne peut pas se trouver sous la grille d'une autre agence. **Écart à la règle « jamais les tables d'un autre module »** : `rate_card_lines` référence `service_zones(agency_id, id)` par clé étrangère composite (`rate_card_lines_agency_zone_service_zones_fk`). C'est une contrainte, pas une lecture : elle garantit en base qu'aucune ligne ne chiffre la zone d'une autre agence ; `pricing` n'interroge jamais cette table (décision D-15 : la zone desservie est la zone tarifaire). Versions et lignes ne sont jamais mises à jour : aucune méthode de repository ne le permet.

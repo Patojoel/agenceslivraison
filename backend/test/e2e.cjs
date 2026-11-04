@@ -1130,6 +1130,331 @@ const { Client } = require('pg');
         activeOne = previousActive;
       }
 
+      // B3.4, B3.5, B3.14, B3.6 (and the complements of B3.1 and B3.3): the delivery rate card, its versions and the price simulation.
+      {
+        const cardAgency = await configAgency();
+        const previousActive = activeOne;
+        activeOne = cardAgency;
+        const zoneOf = async (agency, body) => (await (await addZone(agency, ownerAccess, body)).json());
+        const akwaZone = await zoneOf(cardAgency, { city: 'Douala', district: 'Akwa' });
+        const bonaZone = await zoneOf(cardAgency, { city: 'Douala', district: 'Bonabéri' });
+        const deidoZone = await zoneOf(cardAgency, { city: 'Douala', district: 'Deïdo' });
+        const bepandaZone = await zoneOf(cardAgency, { city: 'Douala', district: 'Bépanda' });
+        assert.equal((await retireZone(cardAgency, bepandaZone.id, ownerAccess)).status, 200);
+        const neighbour = await configAgency();
+        const foreignZone = await zoneOf(neighbour, { city: 'Yaoundé', district: 'Bastos' });
+        const akwaTiers = [{ upTo: '1 kg', price: 1000 }, { upTo: '5 kg', price: 1500 }, { upTo: '10 kg', price: 2500 }, { upTo: '30 kg', price: 5000 }];
+        const bonaTiers = [{ upTo: '1 kg', price: 1500 }];
+        const scaleOf = (akwaPrice = 1000, extra = {}) => ({ lines: [{ zoneId: akwaZone.id, tiers: [{ upTo: '1 kg', price: akwaPrice }, ...akwaTiers.slice(1)] }, { zoneId: bonaZone.id, tiers: bonaTiers }], ...extra });
+        const createCard = (agency, access, body) => act('POST', `${agency}/rate-card`, access, body);
+        const publishCard = (agency, access, body, ifMatch) => act('POST', `${agency}/rate-card/versions`, access, body, ifMatch === undefined ? {} : { 'if-match': ifMatch });
+        const readCard = (agency, access) => act('GET', `${agency}/rate-card`, access);
+        const readHistory = (agency, access, query = '') => act('GET', `${agency}/rate-card/versions${query}`, access);
+        const readVersion = (agency, access, number) => act('GET', `${agency}/rate-card/versions/${number}`, access);
+        const simulate = (agency, access, body) => act('POST', `${agency}/quotes/preview`, access, body);
+        const parcel = (weight, dimensions) => (dimensions === undefined ? { weight } : { weight, dimensions });
+        const cardRows = async (agency) => (await agencyPool.query('SELECT (SELECT count(*)::int FROM rate_cards WHERE agency_id = $1) AS cards, (SELECT count(*)::int FROM rate_card_versions WHERE agency_id = $1) AS versions, (SELECT count(*)::int FROM rate_card_lines WHERE agency_id = $1) AS lines', [agency])).rows[0];
+        const pricingTrail = async (agency) => (await agencyPool.query("SELECT action, user_id, resource_id, details FROM identity_audit WHERE agency_id = $1 AND action ~ '^pricing\\.' ORDER BY occurred_at, id", [agency])).rows;
+        const rejectsWith = async (work, code, message) => {
+          try { await work(); } catch (error) { assert.equal(error.code, code, message); return; }
+          assert.fail(`${message}: expected the database to refuse`);
+        };
+
+        // Nothing exists yet: the version routes answer not found, the simulation answers "no tariff".
+        assert.deepEqual(await cardRows(cardAgency), { cards: 0, versions: 0, lines: 0 });
+        for (const access of [ownerAccess, agentAccess]) {
+          await problemOf(await readCard(cardAgency, access), 404, undefined, 'no rate card yet');
+          await problemOf(await readHistory(cardAgency, access), 404, undefined, 'no history yet');
+          await problemOf(await readVersion(cardAgency, access, 1), 404, undefined, 'no version yet');
+        }
+        const noCard = await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel('1 kg')] });
+        assert.equal(noCard.status, 200, 'an agency without a rate card has no tariff, which is not an error');
+        assert.deepEqual(await noCard.json(), { currency: 'XAF', indicative: true, notice: 'prix indicatif, non garanti sans devis', status: 'no_tariff', version: null, zoneId: akwaZone.id, parcels: [], total: null });
+        await problemOf(await publishCard(cardAgency, ownerAccess, scaleOf(), '"1"'), 404, undefined, 'no version without a rate card');
+
+        // Rights and isolation, before anything is written.
+        await assertHidden('create the rate card', 'POST', agency => `${agency}/rate-card`, scaleOf());
+        await assertHidden('publish a version', 'POST', agency => `${agency}/rate-card/versions`, scaleOf(), { 'if-match': '"1"' });
+        await assertHidden('read the rate card', 'GET', agency => `${agency}/rate-card`);
+        await assertHidden('read the history', 'GET', agency => `${agency}/rate-card/versions`);
+        await assertHidden('read a version', 'GET', agency => `${agency}/rate-card/versions/1`);
+        await assertHidden('simulate a price', 'POST', agency => `${agency}/quotes/preview`, { zoneId: akwaZone.id, parcels: [parcel('1 kg')] });
+        await problemOf(await createCard(cardAgency, agentAccess, scaleOf()), 403, undefined, 'an agent cannot create the rate card');
+        await problemOf(await publishCard(cardAgency, agentAccess, scaleOf(), '"1"'), 403, undefined, 'an agent cannot publish a version');
+        assert.deepEqual(await cardRows(cardAgency), { cards: 0, versions: 0, lines: 0 }, 'refusals write nothing');
+
+        // Invalid scales: 400, and nothing is written.
+        const line = (tiers, zoneId = akwaZone.id) => ({ lines: [{ zoneId, tiers }] });
+        const manyZones = Array.from({ length: 101 }, (_, index) => ({ zoneId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, tiers: [{ upTo: '1 kg', price: 1000 }] }));
+        const manyTiers = Array.from({ length: 21 }, (_, index) => ({ upTo: `${index + 1} kg`, price: 1000 + index }));
+        const invalidScales = {
+          'a field that is not known': { ...scaleOf(), status: 'active' },
+          'a currency other than XAF': scaleOf(1000, { currency: 'EUR' }),
+          'a bound without unit': line([{ upTo: '5', price: 1000 }]),
+          'a bound in pounds': line([{ upTo: '1 lb', price: 1000 }]),
+          'a bound finer than the gram': line([{ upTo: '0,5 g', price: 1000 }]),
+          'a bound over 1 000 kg': line([{ upTo: '1001 kg', price: 1000 }]),
+          'bounds that decrease': line([{ upTo: '5 kg', price: 1500 }, { upTo: '1 kg', price: 1000 }]),
+          'bounds that are equal once converted': line([{ upTo: '1 kg', price: 1000 }, { upTo: '1000 g', price: 1500 }]),
+          'a price of zero': line([{ upTo: '1 kg', price: 0 }]),
+          'a negative price': line([{ upTo: '1 kg', price: -500 }]),
+          'a price with decimals': line([{ upTo: '1 kg', price: 1000.5 }]),
+          'a price over 10 000 000': line([{ upTo: '1 kg', price: 10000001 }]),
+          'a price with a currency in it': line([{ upTo: '1 kg', price: '10 EUR' }]),
+          'a divisor under 1 000': scaleOf(1000, { volumetricDivisor: 999 }),
+          'a divisor over 10 000': scaleOf(1000, { volumetricDivisor: 10001 }),
+          'a zone on two lines': { lines: [{ zoneId: akwaZone.id, tiers: akwaTiers }, { zoneId: akwaZone.id, tiers: bonaTiers }] },
+          'no line': { lines: [] },
+          'a zone without tier': line([]),
+          'more than 100 zones': { lines: manyZones },
+          'more than 20 tiers': line(manyTiers),
+          'a zone that is not an identifier': line(akwaTiers, 'akwa'),
+          'a tier with a field that is not known': line([{ upTo: '1 kg', price: 1000, currency: 'XAF' }]),
+          'a body that is not an object': [],
+        };
+        for (const [what, body] of Object.entries(invalidScales)) {
+          assert.equal((await createCard(cardAgency, ownerAccess, body)).status, 400, `creation refuses ${what}`);
+        }
+        assert.equal((await act('POST', `${cardAgency}/rate-card`, ownerAccess, undefined)).status, 400, 'creation refuses an empty body');
+        assert.equal((await createCard(cardAgency, null, scaleOf())).status, 401, 'creation needs a session');
+        assert.deepEqual(await cardRows(cardAgency), { cards: 0, versions: 0, lines: 0 }, 'invalid scales write nothing');
+
+        // Zones: another agency, unknown, retired.
+        const foreign = await createCard(cardAgency, ownerAccess, line(akwaTiers, foreignZone.id));
+        await problemOf(foreign, 404, undefined, 'a zone of another agency is not found');
+        const unknownZone = await createCard(cardAgency, ownerAccess, line(akwaTiers, '00000000-0000-4000-8000-0000000000fe'));
+        assert.deepEqual(withoutEcho(await unknownZone.json()), withoutEcho(await (await createCard(cardAgency, ownerAccess, line(akwaTiers, foreignZone.id))).json()), 'a zone of another agency answers like an unknown zone');
+        await problemOf(await createCard(cardAgency, ownerAccess, line(akwaTiers, bepandaZone.id)), 409, 'ZONE_RETIRED', 'a retired zone cannot be priced');
+        assert.deepEqual(await cardRows(cardAgency), { cards: 0, versions: 0, lines: 0 }, 'refused zones write nothing');
+        assert.deepEqual(await pricingTrail(cardAgency), [], 'no trace for refusals');
+
+        // Creation by an administrator: 201, version 1 in force, with the labels of the zones.
+        const created = await createCard(cardAgency, adminAccess, scaleOf());
+        assert.equal(created.status, 201, 'an administrator creates the rate card');
+        assert.match(created.headers.get('cache-control'), /no-store/);
+        assert.equal(created.headers.get('etag'), '"1"');
+        const card = await created.json();
+        assert.match(card.id, UUID);
+        assert.deepEqual([card.version.number, card.version.createdBy, card.version.volumetricDivisor, card.version.currency], [1, adminUser, null, 'XAF']);
+        assert.ok(Number.isFinite(Date.parse(card.version.createdAt)));
+        const akwaLine = card.version.zones.find(item => item.zoneId === akwaZone.id);
+        assert.deepEqual(akwaLine, { zoneId: akwaZone.id, city: 'Douala', district: 'Akwa', zoneStatus: 'active', tiers: [{ upToGrams: 1000, price: 1000 }, { upToGrams: 5000, price: 1500 }, { upToGrams: 10000, price: 2500 }, { upToGrams: 30000, price: 5000 }] });
+        assert.equal(card.version.zones.length, 2);
+        assert.deepEqual(await cardRows(cardAgency), { cards: 1, versions: 1, lines: 5 });
+        assert.deepEqual((await pricingTrail(cardAgency)).map(entry => [entry.action, entry.user_id, entry.resource_id, entry.details]), [['pricing.rate_card_created', adminUser, card.id, { fields: ['version:1'] }]]);
+
+        // A second creation is a conflict, and the rate card stays in version 1.
+        await problemOf(await createCard(cardAgency, ownerAccess, scaleOf(1200)), 409, 'RATE_CARD_ALREADY_EXISTS', 'a second rate card is refused');
+        assert.deepEqual(await cardRows(cardAgency), { cards: 1, versions: 1, lines: 5 });
+
+        // Creation is atomic under concurrency: one rate card, one refusal.
+        const raceAgency = await configAgency();
+        const raceAkwa = await zoneOf(raceAgency, { city: 'Douala', district: 'Akwa' });
+        const raceBody = { lines: [{ zoneId: raceAkwa.id, tiers: akwaTiers }] };
+        const raceCreate = await Promise.all([createCard(raceAgency, ownerAccess, raceBody), createCard(raceAgency, adminAccess, raceBody), createCard(raceAgency, ownerAccess, raceBody)]);
+        assert.deepEqual(raceCreate.map(response => response.status).sort(), [201, 409, 409], 'one of the simultaneous creations wins');
+        assert.deepEqual(await cardRows(raceAgency), { cards: 1, versions: 1, lines: 4 });
+        assert.equal((await pricingTrail(raceAgency)).length, 1, 'only the winner is audited');
+
+        // Reading: every active member, ETag on the version in force.
+        for (const access of [ownerAccess, adminAccess, agentAccess]) {
+          const read = await readCard(cardAgency, access);
+          assert.equal(read.status, 200);
+          assert.match(read.headers.get('cache-control'), /no-store/);
+          assert.equal(read.headers.get('etag'), '"1"');
+          assert.deepEqual(await read.json(), card);
+        }
+        assert.equal((await readCard(cardAgency, null)).status, 401);
+
+        // The database refuses what the application would never write.
+        const storedCard = (await agencyPool.query('SELECT id FROM rate_cards WHERE agency_id = $1', [cardAgency])).rows[0].id;
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_card_lines (rate_card_id, version_number, zone_id, position, agency_id, max_weight_grams, price_xaf) VALUES ($1, 1, $2, 1, $3, 1000, 1000)', [storedCard, foreignZone.id, cardAgency]), '23503', 'a line cannot cite the zone of another agency');
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_card_lines (rate_card_id, version_number, zone_id, position, agency_id, max_weight_grams, price_xaf) VALUES ($1, 1, $2, 1, $3, 1000, 1000)', [storedCard, foreignZone.id, neighbour]), '23503', 'a line cannot sit under a rate card of another agency');
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_card_versions (rate_card_id, number, agency_id, created_by, created_at) VALUES ($1, 2, $2, $3, now())', [storedCard, neighbour, adminUser]), '23503', 'a version cannot sit under a rate card of another agency');
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_card_versions (rate_card_id, number, agency_id, created_by, created_at) VALUES ($1, 1, $2, $3, now())', [storedCard, cardAgency, adminUser]), '23505', 'a version number is written once');
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_cards (id, agency_id, current_version, created_at) VALUES ($1, $2, 1, now())', [randomUUID(), cardAgency]), '23505', 'an agency has one rate card');
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_card_lines (rate_card_id, version_number, zone_id, position, agency_id, max_weight_grams, price_xaf) VALUES ($1, 1, $2, 9, $3, 1000, 0)', [storedCard, deidoZone.id, cardAgency]), '23514', 'a price of zero is refused by the database');
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_card_lines (rate_card_id, version_number, zone_id, position, agency_id, max_weight_grams, price_xaf) VALUES ($1, 1, $2, 9, $3, 1000, 10000001)', [storedCard, deidoZone.id, cardAgency]), '23514', 'a price over 10 000 000 is refused by the database');
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_card_lines (rate_card_id, version_number, zone_id, position, agency_id, max_weight_grams, price_xaf) VALUES ($1, 1, $2, 9, $3, 1000001, 1000)', [storedCard, deidoZone.id, cardAgency]), '23514', 'a bound over 1 000 kg is refused by the database');
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_card_lines (rate_card_id, version_number, zone_id, position, agency_id, max_weight_grams, price_xaf) VALUES ($1, 1, $2, 9, $3, 1000, 1000)', [storedCard, akwaZone.id, cardAgency]), '23505', 'a bound is written once per zone and version');
+        await rejectsWith(() => agencyPool.query('INSERT INTO rate_card_versions (rate_card_id, number, agency_id, created_by, created_at, volumetric_divisor) VALUES ($1, 2, $2, $3, now(), 999)', [storedCard, cardAgency, adminUser]), '23514', 'a divisor under 1 000 is refused by the database');
+        assert.deepEqual(await cardRows(cardAgency), { cards: 1, versions: 1, lines: 5 }, 'the refused inserts left nothing');
+
+        // Versions: If-Match is the version in force.
+        const noIfMatch = await publishCard(cardAgency, ownerAccess, scaleOf(1200));
+        assert.equal(noIfMatch.status, 428, 'publishing needs the version it is based on');
+        for (const header of ['W/"1"', 'abc', '*', '"1", "2"', '0', '-1', '99999999999']) assert.equal((await publishCard(cardAgency, ownerAccess, scaleOf(1200), header)).status, 400, `malformed If-Match ${header}`);
+        await problemOf(await publishCard(cardAgency, ownerAccess, scaleOf(1200), '"2"'), 409, 'STALE_RATE_CARD_VERSION', 'a base in the future is not the version in force');
+        assert.equal((await publishCard(cardAgency, ownerAccess, scaleOf(1200), '"1"').then(response => response.status)), 201, 'the owner publishes version 2 on the version in force');
+        const second = await (await readCard(cardAgency, agentAccess)).json();
+        assert.equal(second.version.number, 2);
+        assert.equal(second.version.createdBy, account.id);
+        assert.equal(second.version.zones.find(item => item.zoneId === akwaZone.id).tiers[0].price, 1200, 'version 2 is in force at once');
+        await problemOf(await publishCard(cardAgency, adminAccess, scaleOf(1300), '"1"'), 409, 'STALE_RATE_CARD_VERSION', 'a base that is no longer the version in force');
+        const oldVersion = await readVersion(cardAgency, agentAccess, 1);
+        assert.equal(oldVersion.status, 200);
+        assert.deepEqual(await oldVersion.json(), card, 'version 1 is read exactly as it was written');
+        assert.deepEqual(await cardRows(cardAgency), { cards: 1, versions: 2, lines: 10 });
+
+        // An identical scale writes nothing and answers 200 with the version in force.
+        const same = await publishCard(cardAgency, ownerAccess, scaleOf(1200), '"2"');
+        assert.equal(same.status, 200, 'a scale identical to the one in force creates no version');
+        assert.equal(same.headers.get('etag'), '"2"');
+        assert.equal((await same.json()).version.number, 2);
+        const reordered = { lines: [...scaleOf(1200).lines].reverse() };
+        assert.equal((await publishCard(cardAgency, ownerAccess, reordered, '2')).status, 200, 'the order of the zones does not make a new scale');
+        assert.deepEqual(await cardRows(cardAgency), { cards: 1, versions: 2, lines: 10 });
+
+        // A new version is checked as the creation is; the version in force stays when it is refused.
+        await problemOf(await publishCard(cardAgency, ownerAccess, line(akwaTiers, bepandaZone.id), '"2"'), 409, 'ZONE_RETIRED', 'a retired zone');
+        await problemOf(await publishCard(cardAgency, ownerAccess, line(akwaTiers, foreignZone.id), '"2"'), 404, undefined, 'a zone of another agency');
+        assert.equal((await publishCard(cardAgency, ownerAccess, line([{ upTo: '5', price: 1000 }]), '"2"')).status, 400, 'an invalid scale');
+        assert.equal((await publishCard(cardAgency, null, scaleOf(1400), '"2"')).status, 401);
+        assert.equal((await (await readCard(cardAgency, ownerAccess)).json()).version.number, 2, 'refusals keep the version in force');
+        assert.deepEqual(await cardRows(cardAgency), { cards: 1, versions: 2, lines: 10 });
+
+        // Concurrency: two versions based on the same one, only one wins.
+        const raceVersions = await Promise.all([publishCard(cardAgency, ownerAccess, scaleOf(1300), '"2"'), publishCard(cardAgency, adminAccess, scaleOf(1400), '"2"')]);
+        assert.deepEqual(raceVersions.map(response => response.status).sort(), [201, 409], 'one of the simultaneous versions wins');
+        const loser = raceVersions.find(response => response.status === 409);
+        assert.equal((await loser.json()).code, 'STALE_RATE_CARD_VERSION');
+        assert.deepEqual(await cardRows(cardAgency), { cards: 1, versions: 3, lines: 15 }, 'a single version 3 exists');
+        assert.deepEqual((await agencyPool.query('SELECT number FROM rate_card_versions WHERE agency_id = $1 ORDER BY number', [cardAgency])).rows.map(row => row.number), [1, 2, 3]);
+        assert.equal((await agencyPool.query('SELECT current_version FROM rate_cards WHERE agency_id = $1', [cardAgency])).rows[0].current_version, 3);
+
+        // Versions and retirement of a zone are serialized: a version never prices a zone already retired.
+        const retiring = await zoneOf(cardAgency, { city: 'Douala', district: 'Logpom' });
+        const raceZone = await Promise.all([
+          publishCard(cardAgency, ownerAccess, { lines: [{ zoneId: akwaZone.id, tiers: akwaTiers }, { zoneId: retiring.id, tiers: bonaTiers }] }, '"3"'),
+          retireZone(cardAgency, retiring.id, adminAccess),
+        ]);
+        assert.equal(raceZone[1].status, 200, 'the retirement always succeeds');
+        if (raceZone[0].status === 201) {
+          const written = (await agencyPool.query('SELECT v.created_at, z.retired_at FROM rate_card_versions v, service_zones z WHERE v.agency_id = $1 AND v.number = 4 AND z.id = $2', [cardAgency, retiring.id])).rows[0];
+          assert.ok(written.retired_at >= written.created_at, 'a version written before the retirement, never after');
+        } else {
+          await problemOf(raceZone[0], 409, 'ZONE_RETIRED', 'a version after the retirement is refused');
+        }
+        const nextBase = raceZone[0].status === 201 ? 4 : 3;
+        if (nextBase === 4) assert.equal((await publishCard(cardAgency, ownerAccess, scaleOf(1400), '"4"')).status, 201, 'a version without the retired zone');
+        else assert.equal((await publishCard(cardAgency, ownerAccess, scaleOf(1400), '"3"')).status, 201, 'the next version');
+        const latest = nextBase + 1;
+
+        // The history: most recent first, a version for each effective publication, in pages.
+        const history = await readHistory(cardAgency, agentAccess, '?limit=2');
+        assert.equal(history.status, 200);
+        assert.match(history.headers.get('cache-control'), /no-store/);
+        const firstPage = await history.json();
+        assert.deepEqual(firstPage.items.map(item => item.number), [latest, latest - 1]);
+        assert.deepEqual([firstPage.hasMore, firstPage.nextCursor], [true, String(latest - 1)]);
+        assert.deepEqual(Object.keys(firstPage.items[0]).sort(), ['createdAt', 'createdBy', 'number', 'volumetricDivisor', 'zoneCount']);
+        const secondPage = await (await readHistory(cardAgency, agentAccess, `?limit=2&cursor=${firstPage.nextCursor}`)).json();
+        assert.deepEqual(secondPage.items.map(item => item.number), [latest - 2, latest - 3]);
+        const walked = [...firstPage.items, ...secondPage.items];
+        let cursor = secondPage.nextCursor;
+        while (cursor !== null) {
+          const page = await (await readHistory(cardAgency, ownerAccess, `?limit=2&cursor=${cursor}`)).json();
+          walked.push(...page.items);
+          cursor = page.nextCursor;
+        }
+        assert.deepEqual(walked.map(item => item.number), Array.from({ length: latest }, (_, index) => latest - index), 'every version, once, most recent first');
+        const everything = await (await readHistory(cardAgency, ownerAccess)).json();
+        assert.deepEqual([everything.items.length, everything.hasMore, everything.nextCursor], [latest, false, null]);
+        assert.deepEqual(everything.items.find(item => item.number === 1), { number: 1, createdAt: card.version.createdAt, createdBy: adminUser, volumetricDivisor: null, zoneCount: 2 });
+        for (const bad of ['?limit=0', '?limit=51', '?limit=abc', '?cursor=abc', '?cursor=0', '?cursor=-1', '?cursor=1.5']) assert.equal((await readHistory(cardAgency, ownerAccess, bad)).status, 400, `history refuses ${bad}`);
+        assert.equal((await readHistory(cardAgency, ownerAccess, '?limit=50')).status, 200);
+        assert.equal((await readVersion(cardAgency, ownerAccess, latest + 1)).status, 404, 'an unknown version');
+        for (const bad of ['0', 'abc', '-1', '1.5', '9999999999']) assert.equal((await readVersion(cardAgency, ownerAccess, bad)).status, 400, `version ${bad}`);
+        assert.equal((await readVersion(cardAgency, null, 1)).status, 401);
+        assert.deepEqual((await (await readVersion(cardAgency, agentAccess, 2)).json()).version.zones.find(item => item.zoneId === akwaZone.id).tiers[0].price, 1200, 'version 2 is still the one written');
+
+        // Back to the first prices, so that the simulations below read round figures.
+        assert.equal((await publishCard(cardAgency, ownerAccess, scaleOf(1000), `"${latest}"`)).status, 201, 'the prices of version 1 published again as a new version');
+
+        // The retired zone keeps its tiers and is flagged; it is priced again when it comes back (B3.3).
+        const flagged = await (await readCard(cardAgency, agentAccess)).json();
+        assert.equal(flagged.version.zones.length, 2);
+        assert.equal((await retireZone(cardAgency, akwaZone.id, ownerAccess)).status, 200);
+        const whileRetired = await (await readCard(cardAgency, agentAccess)).json();
+        const retiredLine = whileRetired.version.zones.find(item => item.zoneId === akwaZone.id);
+        assert.deepEqual([retiredLine.zoneStatus, retiredLine.tiers.length, retiredLine.district], ['retired', 4, 'Akwa'], 'a retired zone keeps its tiers in the version in force');
+        await problemOf(await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel('1 kg')] }), 409, 'ZONE_RETIRED', 'a retired zone cannot be priced');
+        const back = await addZone(cardAgency, ownerAccess, { city: 'Douala', district: 'Akwa' });
+        assert.equal((await back.json()).id, akwaZone.id, 'the zone comes back with the same identifier');
+        const afterReturn = await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel('1 kg')] });
+        assert.deepEqual([afterReturn.status, (await afterReturn.json()).total], [200, 1000], 'the tiers of the version in force apply again');
+
+        // The simulation (every member): prices, bounds, volumetric weight, no tariff, out of scale.
+        const priced = await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel('0,8 kg'), parcel('3 kg')] });
+        assert.equal(priced.status, 200);
+        assert.match(priced.headers.get('cache-control'), /no-store/);
+        const expectedVersion = (await (await readCard(cardAgency, ownerAccess)).json()).version.number;
+        assert.deepEqual(await priced.json(), { currency: 'XAF', indicative: true, notice: 'prix indicatif, non garanti sans devis', status: 'priced', version: expectedVersion, zoneId: akwaZone.id, parcels: [{ taxableGrams: 800, price: 1000 }, { taxableGrams: 3000, price: 1500 }], total: 2500 });
+        for (const [weight, price] of [['0,999 kg', 1000], ['1 kg', 1000], ['1000 g', 1000], ['1,001 kg', 1500], ['30 kg', 5000]]) {
+          assert.equal((await (await simulate(cardAgency, ownerAccess, { zoneId: akwaZone.id, parcels: [parcel(weight)] })).json()).total, price, `the bound is included: ${weight}`);
+        }
+        const outOfScale = await (await simulate(cardAgency, adminAccess, { zoneId: akwaZone.id, parcels: [parcel('2 kg'), parcel('31 kg')] })).json();
+        assert.deepEqual([outOfScale.status, outOfScale.total, outOfScale.parcels.map(item => item.price)], ['out_of_scale', null, [1500, null]], 'a parcel over the last bound: signalled, no total');
+        const noTariff = await (await simulate(cardAgency, agentAccess, { zoneId: deidoZone.id, parcels: [parcel('1 kg')] })).json();
+        assert.deepEqual([noTariff.status, noTariff.total, noTariff.parcels, noTariff.version], ['no_tariff', null, [], expectedVersion], 'a zone without a line has no tariff (B3.1)');
+        const rounded = await (await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel('0,0004 kg')] })).json();
+        assert.deepEqual(rounded.parcels, [{ taxableGrams: 1, price: 1000 }], 'the taxable weight is rounded up to the gram');
+        const unmeasured = await (await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel('0,5 kg', { length: 30, width: 20, height: 10, unit: 'cm' })] })).json();
+        assert.deepEqual(unmeasured.parcels, [{ taxableGrams: 500, price: 1000 }], 'without divisor, only the real weight counts');
+        const volumetricVersion = await publishCard(cardAgency, ownerAccess, scaleOf(1000, { volumetricDivisor: 5000 }), `"${expectedVersion}"`);
+        assert.equal(volumetricVersion.status, 201, 'a version with a volumetric divisor');
+        for (const [weight, dimensions, taxable, price] of [['0,5 kg', { length: 30, width: 20, height: 10, unit: 'cm' }, 1200, 1500], ['2 kg', { length: 10, width: 10, height: 10, unit: 'cm' }, 2000, 1500]]) {
+          const result = await (await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel(weight, dimensions)] })).json();
+          assert.deepEqual([result.version, result.parcels[0].taxableGrams, result.total], [expectedVersion + 1, taxable, price], `volumetric weight: ${weight}`);
+        }
+        assert.equal((await (await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel('1 kg')] })).json()).version, expectedVersion + 1, 'the simulation always uses the version in force');
+        const twenty = await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: Array.from({ length: 20 }, () => parcel('1 kg')) });
+        assert.equal((await twenty.json()).total, 20000, 'the total is the exact sum');
+
+        // Invalid simulations.
+        const invalidSimulations = {
+          'a weight without unit': { zoneId: akwaZone.id, parcels: [parcel('2')] },
+          'a weight in pounds': { zoneId: akwaZone.id, parcels: [parcel('2 lb')] },
+          'a weight of zero': { zoneId: akwaZone.id, parcels: [parcel('0 kg')] },
+          'a negative weight': { zoneId: akwaZone.id, parcels: [parcel('-1 kg')] },
+          'a weight over 1 000 kg': { zoneId: akwaZone.id, parcels: [parcel('1001 kg')] },
+          'two dimensions out of three': { zoneId: akwaZone.id, parcels: [parcel('1 kg', { length: 30, width: 20, unit: 'cm' })] },
+          'dimensions without unit': { zoneId: akwaZone.id, parcels: [parcel('1 kg', { length: 30, width: 20, height: 10 })] },
+          'dimensions in inches': { zoneId: akwaZone.id, parcels: [parcel('1 kg', { length: 30, width: 20, height: 10, unit: 'in' })] },
+          'a dimension of zero': { zoneId: akwaZone.id, parcels: [parcel('1 kg', { length: 30, width: 20, height: 0, unit: 'cm' })] },
+          'a dimension over 500 cm': { zoneId: akwaZone.id, parcels: [parcel('1 kg', { length: 501, width: 20, height: 10, unit: 'cm' })] },
+          'no parcel': { zoneId: akwaZone.id, parcels: [] },
+          'more than 20 parcels': { zoneId: akwaZone.id, parcels: Array.from({ length: 21 }, () => parcel('1 kg')) },
+          'a zone that is not an identifier': { zoneId: 'akwa', parcels: [parcel('1 kg')] },
+          'a field that is not known': { zoneId: akwaZone.id, parcels: [parcel('1 kg')], agencyId: cardAgency },
+          'a parcel field that is not known': { zoneId: akwaZone.id, parcels: [{ weight: '1 kg', price: 1 }] },
+          'no zone': { parcels: [parcel('1 kg')] },
+        };
+        for (const [what, body] of Object.entries(invalidSimulations)) assert.equal((await simulate(cardAgency, ownerAccess, body)).status, 400, `simulation refuses ${what}`);
+        assert.equal((await simulate(cardAgency, null, { zoneId: akwaZone.id, parcels: [parcel('1 kg')] })).status, 401);
+        await problemOf(await simulate(cardAgency, ownerAccess, { zoneId: foreignZone.id, parcels: [parcel('1 kg')] }), 404, undefined, 'a zone of another agency');
+        await problemOf(await simulate(cardAgency, ownerAccess, { zoneId: '00000000-0000-4000-8000-0000000000fe', parcels: [parcel('1 kg')] }), 404, undefined, 'an unknown zone');
+        await problemOf(await simulate(cardAgency, ownerAccess, { zoneId: bepandaZone.id, parcels: [parcel('1 kg')] }), 409, 'ZONE_RETIRED', 'a retired zone');
+        const noCardInvalid = await simulate(neighbour, ownerAccess, { zoneId: foreignZone.id, parcels: [parcel('2')] });
+        assert.equal(noCardInvalid.status, 400, 'an invalid weight is refused even where there is no rate card');
+
+        // A simulation writes nothing.
+        const before = [await cardRows(cardAgency), await pricingTrail(cardAgency)];
+        await simulate(cardAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel('1 kg')] });
+        await simulate(cardAgency, agentAccess, { zoneId: deidoZone.id, parcels: [parcel('1 kg')] });
+        assert.deepEqual([await cardRows(cardAgency), await pricingTrail(cardAgency)], before, 'no version, no trace');
+
+        // Audit: one trace per effective creation or version, with the rate card and the version number, nothing else.
+        const trail = await pricingTrail(cardAgency);
+        const effectiveVersions = (await agencyPool.query('SELECT count(*)::int AS total FROM rate_card_versions WHERE agency_id = $1', [cardAgency])).rows[0].total;
+        assert.equal(trail.length, effectiveVersions, 'one trace for each version written, none for refusals, no-ops and simulations');
+        assert.deepEqual(trail[0], { action: 'pricing.rate_card_created', user_id: adminUser, resource_id: card.id, details: { fields: ['version:1'] } });
+        assert.ok(trail.slice(1).every((entry, index) => entry.action === 'pricing.rate_card_versioned' && entry.resource_id === card.id && entry.details.fields[0] === `version:${index + 2}`), 'every later trace names its version');
+        const everyPricingTrace = JSON.stringify(trail);
+        for (const secret of ['Douala', 'Akwa', 'Bonab', akwaZone.id, bonaZone.id]) assert.ok(!everyPricingTrace.includes(secret), `the audit never holds "${secret}"`);
+        activeOne = previousActive;
+      }
+
       // Audit: one row per effective action, names and types only.
       const trail = await configAudit(capsAgency);
       assert.deepEqual(trail.filter(entry => entry.action === 'agency.capability_enabled' || entry.action === 'agency.capability_suspended').slice(0, 3).map(entry => [entry.action, entry.user_id, entry.details]), [
@@ -1209,7 +1534,7 @@ const { Client } = require('pg');
     assert.ok(spec.paths['/api/v1/auth/logout']);
     assert.ok(spec.paths['/api/v1/me']);
     assert.deepEqual(Object.keys(spec.paths).sort(), [
-      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/submit', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
+      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/quotes/preview', '/api/v1/agencies/{agencyId}/rate-card', '/api/v1/agencies/{agencyId}/rate-card/versions', '/api/v1/agencies/{agencyId}/rate-card/versions/{number}', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/submit', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
       '/api/v1/agency-invitations/accept',
       '/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/auth/refresh', '/api/v1/auth/register',
       '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies',

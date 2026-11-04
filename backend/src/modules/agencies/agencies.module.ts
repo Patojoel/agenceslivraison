@@ -24,6 +24,8 @@ import { READ_AGENCY_REPOSITORY } from './application/ports/read-agency.reposito
 import { READ_AGENCY_ONBOARDING_REPOSITORY } from './application/ports/read-agency-onboarding.repository';
 import { READ_AGENCY_MEMBER_REPOSITORY } from './application/ports/read-agency-member.repository';
 import { READ_AGENCY_MEMBERSHIP_REPOSITORY } from './application/ports/read-agency-membership.repository';
+import { READ_AGENCY_DELIVERY_REPOSITORY } from './application/ports/read-agency-delivery.repository';
+import { AgencyAccessReader } from './application/queries/agency-access/agency-access.reader';
 import { ListAgencyMembersHandler } from './application/queries/list-agency-members/list-agency-members.handler';
 import { GetAgencyHandler } from './application/queries/get-agency/get-agency.handler';
 import { GetAgencyOnboardingHandler } from './application/queries/get-agency-onboarding/get-agency-onboarding.handler';
@@ -43,6 +45,7 @@ import { ReadAgencyTypeOrmRepository } from './infrastructure/persistence/typeor
 import { ReadAgencyOnboardingTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-onboarding.typeorm.repository';
 import { ReadAgencyMemberTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-member.typeorm.repository';
 import { ReadAgencyMembershipTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-membership.typeorm.repository';
+import { ReadAgencyDeliveryTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-delivery.typeorm.repository';
 import { AgencyCapabilityController } from './presentation/http/agency-capability.controller';
 import { AgencySiteController } from './presentation/http/agency-site.controller';
 import { AgencyController } from './presentation/http/agency.controller';
@@ -64,6 +67,8 @@ import { ServiceZoneController } from './presentation/http/service-zone.controll
     { provide: READ_AGENCY_ONBOARDING_REPOSITORY, useClass: ReadAgencyOnboardingTypeOrmRepository },
     { provide: READ_SERVICE_ZONE_REPOSITORY, useClass: ReadServiceZoneTypeOrmRepository },
     { provide: READ_AGENCY_SITE_REPOSITORY, useClass: ReadAgencySiteTypeOrmRepository },
+    { provide: READ_AGENCY_DELIVERY_REPOSITORY, useClass: ReadAgencyDeliveryTypeOrmRepository },
+    AgencyAccessReader,
     CreateAgencyHandler,
     UpdateAgencyIdentityHandler,
     UpdateAgencyProfileHandler,
@@ -89,6 +94,8 @@ import { ServiceZoneController } from './presentation/http/service-zone.controll
     ListAgencyMembersHandler,
     AgencyAuditSubscriber,
   ],
+  /** What other modules may read of an agency; they never reach its tables, repositories or handlers. */
+  exports: [AgencyAccessReader],
 })
 export class AgenciesModule implements OnModuleInit {
   constructor(private readonly publisher: InProcessDomainEventPublisher, private readonly audit: AgencyAuditSubscriber) {}
