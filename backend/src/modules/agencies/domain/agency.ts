@@ -2,16 +2,16 @@ import { AggregateRoot } from '@shared/domain/aggregate-root';
 import { UserId } from '@shared/domain/value-objects/user-id';
 import { AgencySnapshot } from './agency.snapshot';
 import { changedFields, EMPTY_IDENTITY, IDENTITY_FIELDS, IdentityChange, PROFILE_FIELDS, ProfileChange, withFields } from './agency-identity';
-import { AgencySite, SITE_FIELDS, SiteChange, SiteDetails } from './agency-site';
+import { AgencySite, MAX_ACTIVE_SITES, MAX_SITES_TOTAL, SITE_FIELDS, SiteChange, SiteDetails } from './agency-site';
 import { CAPABILITY_TYPES, CapabilityState, CapabilityTransition, CapabilityType, REQUIREMENT_OF } from './capability';
 import { evaluateOnboarding } from './onboarding-requirements';
 import { AgencyEvent } from './events/agency-events';
 import {
-  AgencyAlreadySubmitted, AgencyIdentityLocked, AgencySiteNotFound, CapabilityAlreadyActive, CapabilityNotActive, CapabilityPrerequisiteMissing, LastActiveSite, LastActiveZone,
-  ServiceZoneAlreadyRetired, ServiceZoneAlreadyServed, ServiceZoneLimitReached, ServiceZoneNotFound, SiteAlreadyActive, SiteDeactivated, SiteNameTaken,
-  StaleAgencyVersion, StaleSiteVersion, SubmissionIncomplete,
+  ActiveSiteLimitReached, AgencyAlreadySubmitted, AgencyIdentityLocked, AgencySiteNotFound, CapabilityAlreadyActive, CapabilityNotActive, CapabilityPrerequisiteMissing, LastActiveSite, LastActiveZone,
+  ServiceZoneAlreadyRetired, ServiceZoneAlreadyServed, ServiceZoneLimitReached, ServiceZoneNotFound, ServiceZoneRetired, ServiceZoneRetiredDuplicate, ServiceZoneTotalLimitReached,
+  SiteAlreadyActive, SiteDeactivated, SiteNameTaken, SiteTotalLimitReached, StaleAgencyVersion, StaleSiteVersion, SubmissionIncomplete,
 } from './exceptions/agency.exceptions';
-import { MAX_ACTIVE_ZONES, ServiceZone } from './service-zone';
+import { MAX_ACTIVE_ZONES, MAX_ZONES_TOTAL, SERVICE_ZONE_FIELDS, ServiceZone, ServiceZoneField } from './service-zone';
 import { AgencyId } from './value-objects/agency-id';
 import { AgencySiteId } from './value-objects/agency-site-id';
 import { ServiceArea } from './value-objects/service-area';
@@ -87,10 +87,30 @@ export class Agency extends AggregateRoot<AgencyEvent> {
     const known = this.state.zones.find(zone => zone.area.sameAs(area));
     if (known && known.retiredAt === null) throw new ServiceZoneAlreadyServed();
     if (this.activeZones().length >= MAX_ACTIVE_ZONES) throw new ServiceZoneLimitReached();
+    if (!known && this.state.zones.length >= MAX_ZONES_TOTAL) throw new ServiceZoneTotalLimitReached();
     const zone: ServiceZone = known ? { ...known, retiredAt: null } : { id, area, addedAt: now, retiredAt: null };
     this.state = { ...this.state, zones: known ? this.state.zones.map(item => (item === known ? zone : item)) : [...this.state.zones, zone] };
     this.record({ type: 'ServiceZoneAdded', agencyId: this.state.id.value, actorId: actorId.value, zoneId: zone.id.value, reactivated: known !== undefined });
     return zone;
+  }
+
+  /**
+   * Fixes the spelling of an active zone: its identifier, and so whatever points at it, is kept. The new spelling may not be
+   * another zone's, retired or not (a retired zone is brought back by adding it, not by correcting another one onto it).
+   * Last writer wins: there is no version on a zone. A spelling identical to the current one changes nothing.
+   */
+  correctZone(id: ServiceZoneId, area: ServiceArea, actorId: UserId): ServiceZone {
+    const zone = this.state.zones.find(item => item.id.equals(id));
+    if (!zone) throw new ServiceZoneNotFound();
+    if (zone.retiredAt !== null) throw new ServiceZoneRetired();
+    const fields = SERVICE_ZONE_FIELDS.filter((field): field is ServiceZoneField => zone.area[field] !== area[field]);
+    if (fields.length === 0) return zone;
+    const rival = this.state.zones.find(item => item !== zone && item.area.sameAs(area));
+    if (rival) throw rival.retiredAt === null ? new ServiceZoneAlreadyServed() : new ServiceZoneRetiredDuplicate();
+    const corrected: ServiceZone = { ...zone, area };
+    this.state = { ...this.state, zones: this.state.zones.map(item => (item === zone ? corrected : item)) };
+    this.record({ type: 'ServiceZoneRenamed', agencyId: this.state.id.value, actorId: actorId.value, zoneId: zone.id.value, fields });
+    return corrected;
   }
 
   /** Delivery is never active without a zone to serve: the last active zone is kept while it is. */
@@ -107,6 +127,8 @@ export class Agency extends AggregateRoot<AgencyEvent> {
 
   createSite(id: AgencySiteId, details: SiteDetails, actorId: UserId, now: Date): AgencySite {
     this.assertNameFree(details.name.key, null);
+    this.assertRoomForActiveSite();
+    if (this.state.sites.length >= MAX_SITES_TOTAL) throw new SiteTotalLimitReached();
     const site: AgencySite = { id, ...details, createdAt: now, deactivatedAt: null, version: 1 };
     this.state = { ...this.state, sites: [...this.state.sites, site] };
     this.record({ type: 'AgencySiteCreated', agencyId: this.state.id.value, actorId: actorId.value, siteId: id.value });
@@ -142,6 +164,7 @@ export class Agency extends AggregateRoot<AgencyEvent> {
     const site = this.siteOf(id);
     if (site.deactivatedAt === null) throw new SiteAlreadyActive();
     this.assertNameFree(site.name.key, site);
+    this.assertRoomForActiveSite();
     const reactivated: AgencySite = { ...site, deactivatedAt: null, version: site.version + 1 };
     this.replaceSite(site, reactivated);
     this.record({ type: 'AgencySiteReactivated', agencyId: this.state.id.value, actorId: actorId.value, siteId: id.value });
@@ -213,6 +236,10 @@ export class Agency extends AggregateRoot<AgencyEvent> {
     const site = this.state.sites.find(item => item.id.equals(id));
     if (!site) throw new AgencySiteNotFound();
     return site;
+  }
+
+  private assertRoomForActiveSite(): void {
+    if (this.activeSites().length >= MAX_ACTIVE_SITES) throw new ActiveSiteLimitReached();
   }
 
   private replaceSite(previous: AgencySite, next: AgencySite): void {

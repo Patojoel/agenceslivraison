@@ -1,5 +1,5 @@
 import { InvalidTradeName } from '../exceptions/agency.exceptions';
-import { hasControlCharacters } from './plain-text';
+import { hasUnsafeCharacters } from './plain-text';
 
 export const TRADE_NAME_MIN = 2;
 export const TRADE_NAME_MAX = 120;
@@ -11,7 +11,7 @@ export class TradeName {
   static of(raw: string): TradeName {
     const value = raw.trim();
     const length = Array.from(value).length;
-    if (hasControlCharacters(value) || length < TRADE_NAME_MIN || length > TRADE_NAME_MAX) throw new InvalidTradeName();
+    if (hasUnsafeCharacters(raw, true) || hasUnsafeCharacters(value, false) || length < TRADE_NAME_MIN || length > TRADE_NAME_MAX) throw new InvalidTradeName();
     return new TradeName(value);
   }
 }

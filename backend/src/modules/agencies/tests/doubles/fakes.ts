@@ -94,7 +94,15 @@ export class InMemoryAgencyTeamRepository implements AgencyTeamRepository {
     this.rows.set(AGENCY, memberships);
   }
 
+  /** How many times the agency row was locked: an actor who is refused must not have taken the lock. */
+  locks = 0;
+
+  async load(agencyId: AgencyId): Promise<AgencyTeam> {
+    return AgencyTeam.reconstitute(agencyId, this.rows.get(agencyId.value) ?? []);
+  }
+
   async lockAndLoad(agencyId: AgencyId): Promise<AgencyTeam> {
+    this.locks += 1;
     return AgencyTeam.reconstitute(agencyId, this.rows.get(agencyId.value) ?? []);
   }
 

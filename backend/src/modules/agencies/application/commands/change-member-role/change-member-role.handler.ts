@@ -5,6 +5,7 @@ import { UserId } from '@shared/domain/value-objects/user-id';
 import { AGENCY_TEAM_REPOSITORY, AgencyTeamRepository } from '../../../domain/ports/agency-team.repository';
 import { AgencyId } from '../../../domain/value-objects/agency-id';
 import { MembershipId } from '../../../domain/value-objects/membership-id';
+import { lockTeamForActor } from '../lock-team';
 import { ChangeMemberRoleCommand } from './change-member-role.command';
 
 @Injectable()
@@ -15,8 +16,10 @@ export class ChangeMemberRoleHandler implements CommandHandler<ChangeMemberRoleC
   ) {}
 
   async handle(command: ChangeMemberRoleCommand): Promise<{ success: true }> {
-    const team = await this.teams.lockAndLoad(AgencyId.of(command.agencyId));
-    team.changeRole(UserId.of(command.actorId), MembershipId.of(command.membershipId), command.role);
+    const actorId = UserId.of(command.actorId);
+    const membershipId = MembershipId.of(command.membershipId);
+    const team = await lockTeamForActor(this.teams, AgencyId.of(command.agencyId), actorId, (loaded, actor) => loaded.authorizeMembershipChange(actor, membershipId, command.role));
+    team.changeRole(actorId, membershipId, command.role);
     await this.teams.save(team);
     await this.events.publish(team.pullEvents());
     return { success: true };

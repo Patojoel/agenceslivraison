@@ -5,6 +5,7 @@ import { HeadquartersAddress } from './value-objects/headquarters-address';
 import { HeadquartersCity } from './value-objects/headquarters-city';
 import { LegalName } from './value-objects/legal-name';
 import { Niu } from './value-objects/niu';
+import { hasUnsafeCharacters } from './value-objects/plain-text';
 import { PrimaryPhone } from './value-objects/primary-phone';
 import { Rccm } from './value-objects/rccm';
 import { TradeName } from './value-objects/trade-name';
@@ -73,11 +74,8 @@ function optional<T>(raw: string | null | undefined, of: (text: string) => T): T
   return raw === null || raw.trim() === '' ? null : of(raw);
 }
 
-/** Control (`Cc`) and format (`Cf`: NUL, BEL, ESC, bidi marks, zero-width) characters have no place in an address; PostgreSQL refuses NUL. */
-const UNSAFE_CHARACTER = /[\p{Cc}\p{Cf}]/u;
-
 function contactEmailOf(raw: string): Email {
-  if (UNSAFE_CHARACTER.test(raw)) throw new InvalidAgencyField('contactEmail');
+  if (hasUnsafeCharacters(raw, false)) throw new InvalidAgencyField('contactEmail');
   return Email.of(raw);
 }
 

@@ -7,6 +7,7 @@ import { AgencyNotFound } from '../../../domain/exceptions/agency.exceptions';
 import { AGENCY_REPOSITORY, AgencyRepository } from '../../../domain/ports/agency.repository';
 import { AGENCY_TEAM_REPOSITORY, AgencyTeamRepository } from '../../../domain/ports/agency-team.repository';
 import { AgencyId } from '../../../domain/value-objects/agency-id';
+import { lockTeamForActor } from '../lock-team';
 import { UpdateAgencyProfileCommand } from './update-agency-profile.command';
 import { UpdateAgencyProfileResponse } from './update-agency-profile.response';
 
@@ -22,7 +23,7 @@ export class UpdateAgencyProfileHandler implements CommandHandler<UpdateAgencyPr
   async handle(command: UpdateAgencyProfileCommand): Promise<UpdateAgencyProfileResponse> {
     const agencyId = AgencyId.of(command.agencyId);
     const actorId = UserId.of(command.actorId);
-    const team = await this.teams.lockAndLoad(agencyId);
+    const team = await lockTeamForActor(this.teams, agencyId, actorId, (loaded, actor) => loaded.authorizeAgencyEdition(actor));
     team.authorizeAgencyEdition(actorId);
     const agency = await this.agencies.findById(agencyId);
     if (!agency) throw new AgencyNotFound();

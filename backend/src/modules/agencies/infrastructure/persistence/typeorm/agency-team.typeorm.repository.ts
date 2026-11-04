@@ -25,10 +25,18 @@ export class AgencyTeamTypeOrmRepository implements AgencyTeamRepository {
 
   constructor(private readonly connection: TypeOrmDatabaseConnection) {}
 
+  async load(agencyId: AgencyId): Promise<AgencyTeam> {
+    const manager = await this.connection.manager();
+    return this.teamOf(agencyId, await manager.find(AgencyMembershipOrmEntity, { where: { agencyId: agencyId.value } }));
+  }
+
   async lockAndLoad(agencyId: AgencyId): Promise<AgencyTeam> {
     const manager = await this.connection.manager();
     await manager.findOne(AgencyOrmEntity, { where: { id: agencyId.value }, lock: { mode: 'pessimistic_write' } });
-    const rows = await manager.find(AgencyMembershipOrmEntity, { where: { agencyId: agencyId.value } });
+    return this.teamOf(agencyId, await manager.find(AgencyMembershipOrmEntity, { where: { agencyId: agencyId.value } }));
+  }
+
+  private teamOf(agencyId: AgencyId, rows: readonly AgencyMembershipOrmEntity[]): AgencyTeam {
     const team = AgencyTeam.reconstitute(agencyId, rows.map(MembershipMapper.toDomain));
     this.loaded.set(team, team.snapshot());
     return team;

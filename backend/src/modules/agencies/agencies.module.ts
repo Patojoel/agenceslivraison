@@ -10,6 +10,7 @@ import { CreateAgencySiteHandler } from './application/commands/create-agency-si
 import { DeactivateAgencySiteHandler } from './application/commands/deactivate-agency-site/deactivate-agency-site.handler';
 import { EnableCapabilityHandler } from './application/commands/enable-capability/enable-capability.handler';
 import { ReactivateAgencySiteHandler } from './application/commands/reactivate-agency-site/reactivate-agency-site.handler';
+import { CorrectServiceZoneHandler } from './application/commands/correct-service-zone/correct-service-zone.handler';
 import { RetireServiceZoneHandler } from './application/commands/retire-service-zone/retire-service-zone.handler';
 import { SuspendCapabilityHandler } from './application/commands/suspend-capability/suspend-capability.handler';
 import { SubmitAgencyHandler } from './application/commands/submit-agency/submit-agency.handler';
@@ -69,6 +70,7 @@ import { ServiceZoneController } from './presentation/http/service-zone.controll
     SubmitAgencyHandler,
     AddServiceZoneHandler,
     RetireServiceZoneHandler,
+    CorrectServiceZoneHandler,
     CreateAgencySiteHandler,
     UpdateAgencySiteHandler,
     DeactivateAgencySiteHandler,

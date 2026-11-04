@@ -5,6 +5,7 @@ import { UserId } from '@shared/domain/value-objects/user-id';
 import { AGENCY_TEAM_REPOSITORY, AgencyTeamRepository } from '../../../domain/ports/agency-team.repository';
 import { AgencyId } from '../../../domain/value-objects/agency-id';
 import { MembershipId } from '../../../domain/value-objects/membership-id';
+import { lockTeamForActor } from '../lock-team';
 import { RevokeMembershipCommand } from './revoke-membership.command';
 
 @Injectable()
@@ -15,8 +16,10 @@ export class RevokeMembershipHandler implements CommandHandler<RevokeMembershipC
   ) {}
 
   async handle(command: RevokeMembershipCommand): Promise<{ success: true }> {
-    const team = await this.teams.lockAndLoad(AgencyId.of(command.agencyId));
-    team.revoke(UserId.of(command.actorId), MembershipId.of(command.membershipId));
+    const actorId = UserId.of(command.actorId);
+    const membershipId = MembershipId.of(command.membershipId);
+    const team = await lockTeamForActor(this.teams, AgencyId.of(command.agencyId), actorId, (loaded, actor) => loaded.authorizeMembershipChange(actor, membershipId));
+    team.revoke(actorId, membershipId);
     await this.teams.save(team);
     await this.events.publish(team.pullEvents());
     return { success: true };

@@ -12,6 +12,7 @@ import { AGENCY_TEAM_REPOSITORY, AgencyTeamRepository } from '../../../domain/po
 import { INVITATION_REPOSITORY, InvitationRepository } from '../../../domain/ports/invitation.repository';
 import { AgencyId } from '../../../domain/value-objects/agency-id';
 import { InvitationId } from '../../../domain/value-objects/invitation-id';
+import { lockTeamForActor } from '../lock-team';
 import { IssueInvitationCommand } from './issue-invitation.command';
 import { IssueInvitationResponse } from './issue-invitation.response';
 
@@ -28,7 +29,7 @@ export class IssueInvitationHandler implements CommandHandler<IssueInvitationCom
 
   async handle(command: IssueInvitationCommand): Promise<IssueInvitationResponse> {
     const actorId = UserId.of(command.actorId);
-    const team = await this.teams.lockAndLoad(AgencyId.of(command.agencyId));
+    const team = await lockTeamForActor(this.teams, AgencyId.of(command.agencyId), actorId, (loaded, actor) => loaded.authorizeInvitation(actor, command.role));
     team.authorizeInvitation(actorId, command.role);
     const secret = this.secrets.generate();
     const invitation = Invitation.issue({

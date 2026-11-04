@@ -28,6 +28,11 @@ export class ServiceZoneMapper {
     return entity;
   }
 
+  /** The columns a correction or a retirement may change; `null` is written as NULL, whereas TypeORM skips `undefined`. */
+  static changes(zone: ServiceZone): Partial<ServiceZoneOrmEntity> {
+    return { city: zone.area.city, district: zone.area.district, cityKey: zone.area.cityKey, districtKey: zone.area.districtKey, retiredAt: zone.retiredAt };
+  }
+
   static toDomain(row: ServiceZoneOrmEntity): ServiceZone {
     return { id: ServiceZoneId.of(row.id), area: ServiceArea.of(row.city, row.district), addedAt: row.addedAt, retiredAt: row.retiredAt };
   }

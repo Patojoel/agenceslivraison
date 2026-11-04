@@ -88,6 +88,20 @@ export class ServiceZoneLimitReached extends DomainException {
   constructor() { super('conflict', 'The maximum number of active zones is reached', { code: 'ZONE_LIMIT_REACHED' }); }
 }
 
+/** Correcting a zone towards a retired one would make its reactivation impossible: the retired zone is to be added again instead. */
+export class ServiceZoneRetiredDuplicate extends DomainException {
+  constructor() { super('conflict', 'A retired zone already has this spelling: add it again instead', { code: 'ZONE_RETIRED_DUPLICATE' }); }
+}
+
+/** A retired zone is history: it is only brought back, never edited. */
+export class ServiceZoneRetired extends DomainException {
+  constructor() { super('conflict', 'This zone is retired', { code: 'ZONE_RETIRED' }); }
+}
+
+export class ServiceZoneTotalLimitReached extends DomainException {
+  constructor() { super('conflict', 'The maximum number of zones, retired ones included, is reached', { code: 'ZONE_TOTAL_LIMIT_REACHED' }); }
+}
+
 export class ServiceZoneAlreadyRetired extends DomainException {
   constructor() { super('conflict', 'This zone is already retired', { code: 'ZONE_ALREADY_RETIRED' }); }
 }
@@ -103,6 +117,14 @@ export class AgencySiteNotFound extends DomainException {
 
 export class SiteNameTaken extends DomainException {
   constructor() { super('conflict', 'An active site already has this name', { code: 'SITE_NAME_TAKEN' }); }
+}
+
+export class ActiveSiteLimitReached extends DomainException {
+  constructor() { super('conflict', 'The maximum number of active sites is reached', { code: 'SITE_LIMIT_REACHED' }); }
+}
+
+export class SiteTotalLimitReached extends DomainException {
+  constructor() { super('conflict', 'The maximum number of sites, deactivated ones included, is reached', { code: 'SITE_TOTAL_LIMIT_REACHED' }); }
 }
 
 export class SiteDeactivated extends DomainException {

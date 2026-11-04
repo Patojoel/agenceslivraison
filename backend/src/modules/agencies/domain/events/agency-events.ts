@@ -1,4 +1,5 @@
 import { DomainEvent } from '@shared/domain/domain-event';
+import { ServiceZoneField } from '../service-zone';
 import { IdentityField, ProfileField } from '../agency-identity';
 import { SiteField } from '../agency-site';
 import { CapabilityType } from '../capability';
@@ -8,6 +9,7 @@ export type AgencyEvent =
   | { readonly type: 'AgencyIdentityUpdated'; readonly agencyId: string; readonly actorId: string; readonly fields: readonly IdentityField[] }
   | { readonly type: 'AgencyProfileUpdated'; readonly agencyId: string; readonly actorId: string; readonly fields: readonly ProfileField[] }
   | { readonly type: 'ServiceZoneAdded'; readonly agencyId: string; readonly actorId: string; readonly zoneId: string; readonly reactivated: boolean }
+  | { readonly type: 'ServiceZoneRenamed'; readonly agencyId: string; readonly actorId: string; readonly zoneId: string; readonly fields: readonly ServiceZoneField[] }
   | { readonly type: 'ServiceZoneRetired'; readonly agencyId: string; readonly actorId: string; readonly zoneId: string }
   | { readonly type: 'AgencySiteCreated'; readonly agencyId: string; readonly actorId: string; readonly siteId: string }
   | { readonly type: 'AgencySiteUpdated'; readonly agencyId: string; readonly actorId: string; readonly siteId: string; readonly fields: readonly SiteField[] }
@@ -23,7 +25,7 @@ export type AgencyEvent =
 
 const TYPES: ReadonlySet<string> = new Set<AgencyEvent['type']>([
   'AgencyRegistered', 'AgencyIdentityUpdated', 'AgencyProfileUpdated', 'AgencySubmittedForVerification',
-  'ServiceZoneAdded', 'ServiceZoneRetired',
+  'ServiceZoneAdded', 'ServiceZoneRenamed', 'ServiceZoneRetired',
   'AgencySiteCreated', 'AgencySiteUpdated', 'AgencySiteDeactivated', 'AgencySiteReactivated',
   'AgencyCapabilityEnabled', 'AgencyCapabilitySuspended',
   'InvitationIssued', 'InvitationAccepted', 'MembershipRoleChanged', 'MembershipRevoked',

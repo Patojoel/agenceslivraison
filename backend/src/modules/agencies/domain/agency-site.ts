@@ -5,6 +5,10 @@ import { SiteCity } from './value-objects/site-city';
 import { SiteName } from './value-objects/site-name';
 import { SitePhone } from './value-objects/site-phone';
 
+/** Same reasons as for the zones: the whole agency is loaded for every configuration write. */
+export const MAX_ACTIVE_SITES = 50;
+export const MAX_SITES_TOTAL = 200;
+
 /** A place where the agency works (counter, depot). It has its own version: it is edited independently of the agency. */
 export interface AgencySite {
   readonly id: AgencySiteId;

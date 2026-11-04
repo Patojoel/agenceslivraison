@@ -1,6 +1,6 @@
 import { AggregateRoot } from '@shared/domain/aggregate-root';
 import { UserId } from '@shared/domain/value-objects/user-id';
-import { AgencyRole, InvitationRole, managesAgencyIdentity } from './agency-role';
+import { AgencyRole, canInvite, canManage, InvitationRole, managesAgencyIdentity, submitsAgency } from './agency-role';
 import { AgencyEvent } from './events/agency-events';
 import { AgencyEditForbidden, AgencySubmissionForbidden, AlreadyMember, LastOwner, MembershipForbidden, MembershipNotFound } from './exceptions/agency.exceptions';
 import { AgencyId } from './value-objects/agency-id';
@@ -34,7 +34,7 @@ export class AgencyTeam extends AggregateRoot<AgencyEvent> {
 
   authorizeInvitation(actorId: UserId, role: InvitationRole): void {
     const actor = this.activeMemberByUser(actorId);
-    if (actor.role !== 'owner' && !(actor.role === 'admin' && role === 'agent')) throw new MembershipForbidden();
+    if (!canInvite(actor.role, role)) throw new MembershipForbidden();
   }
 
   /** Identity and profile are managed by owners and administrators; an agent only reads. */
@@ -44,7 +44,14 @@ export class AgencyTeam extends AggregateRoot<AgencyEvent> {
 
   /** Only an owner submits the agency: a recipient of the other roles is told so, an outsider sees nothing. */
   authorizeAgencySubmission(actorId: UserId): void {
-    if (this.activeMemberByUser(actorId).role !== 'owner') throw new AgencySubmissionForbidden();
+    if (!submitsAgency(this.activeMemberByUser(actorId).role)) throw new AgencySubmissionForbidden();
+  }
+
+  /** Who may change this membership to `nextRole`, or remove it (no `nextRole`): also asked before the lock is taken, so it has no side effect. */
+  authorizeMembershipChange(actorId: UserId, membershipId: MembershipId, nextRole?: AgencyRole): void {
+    const actor = this.activeMemberByUser(actorId);
+    const target = this.activeMembership(membershipId);
+    this.authorizeManagement(actor, target, nextRole ?? target.role);
   }
 
   changeRole(actorId: UserId, membershipId: MembershipId, role: AgencyRole): void {
@@ -71,6 +78,11 @@ export class AgencyTeam extends AggregateRoot<AgencyEvent> {
     this.memberships = [...this.memberships, { id: membershipId, userId, role, active: true }];
   }
 
+  /** An outsider or a former member is "not found"; nothing else is checked. */
+  assertActiveMember(userId: UserId): void {
+    this.activeMemberByUser(userId);
+  }
+
   private activeMemberByUser(userId: UserId): Membership {
     const membership = this.memberships.find(item => item.active && item.userId.equals(userId));
     if (!membership) throw new MembershipNotFound();
@@ -86,9 +98,7 @@ export class AgencyTeam extends AggregateRoot<AgencyEvent> {
   /** Nobody manages their own access; an owner manages anyone, an admin only agents and only as agents. */
   private authorizeManagement(actor: Membership, target: Membership, nextRole: AgencyRole): void {
     if (actor.userId.equals(target.userId)) throw new MembershipForbidden();
-    if (actor.role === 'owner') return;
-    if (actor.role === 'admin' && target.role === 'agent' && nextRole === 'agent') return;
-    throw new MembershipForbidden();
+    if (!canManage(actor.role, target.role) || !canManage(actor.role, nextRole)) throw new MembershipForbidden();
   }
 
   private protectLastOwner(target: Membership): void {

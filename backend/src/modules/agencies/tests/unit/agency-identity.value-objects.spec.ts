@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { DomainException } from '@shared/domain/exceptions/domain.exception';
 import { Email, InvalidEmail } from '@shared/domain/value-objects/email';
 import { identityChangeOf } from '../../domain/agency-identity';
 import { InvalidAgencyField } from '../../domain/exceptions/agency.exceptions';
@@ -10,6 +11,11 @@ import { LegalName } from '../../domain/value-objects/legal-name';
 import { Niu } from '../../domain/value-objects/niu';
 import { PrimaryPhone } from '../../domain/value-objects/primary-phone';
 import { Rccm } from '../../domain/value-objects/rccm';
+import { ServiceArea } from '../../domain/value-objects/service-area';
+import { SiteAddress } from '../../domain/value-objects/site-address';
+import { SiteCity } from '../../domain/value-objects/site-city';
+import { SiteName } from '../../domain/value-objects/site-name';
+import { SuspensionReason } from '../../domain/value-objects/suspension-reason';
 import { TradeName } from '../../domain/value-objects/trade-name';
 
 interface Bounds { readonly name: string; readonly of: (raw: string) => { readonly value: string }; readonly min: number; readonly max: number }
@@ -122,4 +128,33 @@ test('a valid contact e-mail passes, is normalized, and can still be cleared', (
   assert.equal(identityChangeOf({ contactEmail: null }).contactEmail, null);
   assert.equal(identityChangeOf({ contactEmail: '  ' }).contactEmail, null);
   assert.equal(identityChangeOf({}).contactEmail, undefined);
+});
+
+const UNSAFE = ['\u0000', '\u0007', '\u001b', '\u007F', '\u0085', '​', '‌', '‍', '⁠', '﻿', '‮', '⁦', '­'];
+
+test('every text of the agency refuses control and format characters, with an invalid error and never a 500', () => {
+  const texts: readonly (readonly [string, (raw: string) => unknown])[] = [
+    ['trade name', TradeName.of], ['legal name', LegalName.of], ['headquarters city', HeadquartersCity.of], ['headquarters address', HeadquartersAddress.of], ['rccm', Rccm.of],
+    ['description', Description.of], ['zone city', raw => ServiceArea.of(raw, null)], ['zone district', raw => ServiceArea.of('Douala', raw)],
+    ['site name', SiteName.of], ['site city', SiteCity.of], ['site address', SiteAddress.of], ['suspension reason', SuspensionReason.of],
+  ];
+  for (const [name, of] of texts) {
+    for (const char of UNSAFE) {
+      assert.throws(() => of(`Akwa${char}Nord 1`), (error: unknown) => error instanceof DomainException && error.kind === 'invalid', `${name} ${JSON.stringify(char)}`);
+      assert.throws(() => of(`${char}Akwa Nord 1`), DomainException, `${name} leading ${JSON.stringify(char)}`);
+    }
+  }
+});
+
+test('tab, line feed and carriage return stay allowed where a text may have several lines, and are folded elsewhere', () => {
+  assert.equal(Description.of('Ligne 1\r\nLigne\t2').value, 'Ligne 1\r\nLigne\t2');
+  assert.equal(SuspensionReason.of('Motif\nsuite').value, 'Motif\nsuite');
+  assert.equal(SiteName.of('Agence\tAkwa').value, 'Agence Akwa');
+  assert.equal(ServiceArea.of('Port\nHarcourt', null).city, 'Port Harcourt');
+});
+
+test('a zone or a site name cannot be made different from another by an invisible character', () => {
+  assert.throws(() => ServiceArea.of('Dou​ala', 'Akwa'), InvalidAgencyField);
+  assert.throws(() => SiteName.of('Agence​Akwa'), InvalidAgencyField);
+  assert.equal(SiteName.of('Agence Akwa').key, SiteName.of(' agence   AKWA ').key);
 });

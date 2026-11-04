@@ -16,6 +16,8 @@ function toAuditEntry(event: AgencyEvent): AuditEntry {
       return { userId: event.actorId, action: 'agency.submitted', agencyId: event.agencyId };
     case 'ServiceZoneAdded':
       return { userId: event.actorId, action: event.reactivated ? 'agency.zone_reactivated' : 'agency.zone_added', agencyId: event.agencyId, resourceId: event.zoneId };
+    case 'ServiceZoneRenamed':
+      return { userId: event.actorId, action: 'agency.zone_renamed', agencyId: event.agencyId, resourceId: event.zoneId, details: { fields: event.fields } };
     case 'ServiceZoneRetired':
       return { userId: event.actorId, action: 'agency.zone_retired', agencyId: event.agencyId, resourceId: event.zoneId };
     case 'AgencySiteCreated':

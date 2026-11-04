@@ -61,7 +61,7 @@ export class AgencyTypeOrmRepository implements AgencyRepository {
     for (const zone of now.zones) {
       const previous = zonesBefore.get(zone.id.value);
       if (!previous) await manager.insert(ServiceZoneOrmEntity, ServiceZoneMapper.toOrm(agencyId, zone));
-      else if (previous !== zone) await manager.update(ServiceZoneOrmEntity, { id: zone.id.value, agencyId }, { retiredAt: zone.retiredAt });
+      else if (previous !== zone) await manager.update(ServiceZoneOrmEntity, { id: zone.id.value, agencyId }, ServiceZoneMapper.changes(zone));
     }
     const sitesBefore = new Map((before?.sites ?? []).map(site => [site.id.value, site]));
     for (const site of now.sites) {

@@ -3,13 +3,22 @@ import { InvalidAgencyField } from '../exceptions/agency.exceptions';
 const TAB = 0x09;
 const LINE_FEED = 0x0a;
 const CARRIAGE_RETURN = 0x0d;
-const DELETE = 0x7f;
+const CONTROL = /\p{Cc}/u;
+const FORMAT = /\p{Cf}/u;
 
-/** Control characters other than tab, line feed and carriage return: PostgreSQL refuses NUL and the rest has no place in a name. */
-export function hasControlCharacters(raw: string): boolean {
+/**
+ * The one definition of what no text of an agency may contain: control characters (`Cc`, NUL included, which PostgreSQL
+ * refuses) and format characters (`Cf`: bidi marks, zero-width characters, byte order mark, soft hyphen), which make two
+ * different-looking texts read alike or hide what a name says. Tab, line feed and carriage return are the only controls
+ * kept, and only where `allowLineBreaks` says that the text may span lines.
+ */
+export function hasUnsafeCharacters(raw: string, allowLineBreaks: boolean): boolean {
   for (const char of raw) {
+    if (FORMAT.test(char)) return true;
+    if (!CONTROL.test(char)) continue;
     const code = char.codePointAt(0) ?? 0;
-    if (code === DELETE || (code < 0x20 && code !== TAB && code !== LINE_FEED && code !== CARRIAGE_RETURN)) return true;
+    const lineBreak = code === TAB || code === LINE_FEED || code === CARRIAGE_RETURN;
+    if (!(allowLineBreaks && lineBreak)) return true;
   }
   return false;
 }
@@ -21,7 +30,7 @@ export function characterCount(value: string): number {
 
 function checked(value: string, raw: string, field: string, min: number, max: number): string {
   const length = characterCount(value);
-  if (hasControlCharacters(raw) || length < min || length > max) throw new InvalidAgencyField(field);
+  if (hasUnsafeCharacters(raw, true) || length < min || length > max) throw new InvalidAgencyField(field);
   return value;
 }
 

@@ -1,6 +1,6 @@
 # Agences et onboarding — lot B2 implémenté
 
-Dix-sept routes sont disponibles : la création d'un brouillon (B2.1), l'état d'onboarding (B2.9), la lecture d'une agence, la complétion de l'identité (B2.2), la modification du profil (B2.6), les zones desservies (B2.3), les sites (B2.8) et l'activation et la suspension des capacités (B2.4, B2.7). la soumission à vérification (B2.5) ; la liste des membres (B2.10) est décrite dans [Identité et accès](identite-acces.md). Toutes les routes demandent `Authorization: Bearer <accessToken>` et répondent avec `Cache-Control: no-store`. Les erreurs utilisent Problem Details (voir [conventions](../conventions.md)).
+Dix-huit routes sont disponibles : la création d'un brouillon (B2.1), l'état d'onboarding (B2.9), la lecture d'une agence, la complétion de l'identité (B2.2), la modification du profil (B2.6), les zones desservies (B2.3) et la correction du libellé d'une zone (B3.2), les sites (B2.8) et l'activation et la suspension des capacités (B2.4, B2.7). la soumission à vérification (B2.5) ; la liste des membres (B2.10) est décrite dans [Identité et accès](identite-acces.md). Toutes les routes demandent `Authorization: Bearer <accessToken>` et répondent avec `Cache-Control: no-store`. Les erreurs utilisent Problem Details (voir [conventions](../conventions.md)).
 
 ## Créer un brouillon d'agence
 
@@ -173,7 +173,7 @@ L'agence visée vient du chemin et n'est jamais lue dans le corps ; le membershi
 
 ## Zones desservies
 
-Une zone est une ville (2 à 80 caractères) et, facultativement, un quartier (2 à 80 caractères) ; sans quartier, elle couvre toute la ville. Le texte est libre, débarrassé des espaces de bord et des espaces multiples ; les caractères de contrôle sont refusés. Deux zones **actives** d'une agence ne peuvent pas être égales, sans tenir compte de la casse, des accents ni des espaces (`Douala / Akwa`, `douala / AKWA` et `Douala / Akwá` sont la même zone). Une agence dessert au plus **100 zones actives**. Zones, sites et capacités se gèrent en brouillon comme après la soumission, et ne changent pas la version de l'agence.
+Une zone est une ville (2 à 80 caractères) et, facultativement, un quartier (2 à 80 caractères) ; sans quartier, elle couvre toute la ville. Le texte est libre, débarrassé des espaces de bord et des espaces multiples (une tabulation ou un saut de ligne devient une espace) ; les caractères de contrôle et de format (NUL, bidi comme U+202E, largeurs nulles comme U+200B, U+FEFF…) sont refusés en **400**, comme dans tous les textes d'une agence (nom commercial, description, identité, sites, motifs). Deux zones **actives** d'une agence ne peuvent pas être égales, sans tenir compte de la casse, des accents ni des espaces (`Douala / Akwa`, `douala / AKWA` et `Douala / Akwá` sont la même zone). Une agence dessert au plus **100 zones actives** et garde au plus **300 zones**, retirées comprises. Zones, sites et capacités se gèrent en brouillon comme après la soumission, et ne changent pas la version de l'agence.
 
 La zone desservie est **la même zone** que celle des grilles tarifaires du lot 3 (décision D-15) : son `id` est durable. Une zone n'est jamais supprimée : elle est **retirée** (`status: "retired"`, avec sa date), et l'ajouter de nouveau la réactive avec le même `id`.
 
@@ -200,7 +200,7 @@ Objet zone, renvoyé par les trois routes :
 | 401 | Jeton absent, invalide ou session révoquée. |
 | 403 | Le membre est un agent. |
 | 404 | Agence inconnue, ou personne sans membership actif (même réponse). |
-| 409 | `code: "ZONE_ALREADY_SERVED"` (zone active identique) ou `code: "ZONE_LIMIT_REACHED"` (100 zones actives ; la réactivation compte comme un ajout). |
+| 409 | `code: "ZONE_ALREADY_SERVED"` (zone active identique), `code: "ZONE_LIMIT_REACHED"` (100 zones actives ; la réactivation compte comme un ajout) ou `code: "ZONE_TOTAL_LIMIT_REACHED"` (300 zones, retirées comprises ; ajouter une zone retirée la réactive sans créer de ligne et reste possible). |
 
 ### Retirer une zone
 
@@ -213,6 +213,19 @@ Objet zone, renvoyé par les trois routes :
 | 401, 403 | Comme ci-dessus. |
 | 404 | Agence inconnue ou sans accès, **ou zone inconnue ou d'une autre agence** : même réponse. L'identifiant de zone n'est cherché que dans l'agence du chemin. |
 | 409 | `code: "ZONE_ALREADY_RETIRED"`, ou `code: "LAST_ACTIVE_ZONE"` : c'est la dernière zone active et la livraison est active (suspendre la livraison ou ajouter une autre zone d'abord). Livraison inactive ou suspendue : le retrait est accepté. |
+
+### Corriger une zone
+
+`PATCH /api/v1/agencies/{agencyId}/zones/{zoneId}` — propriétaire ou administrateur. Corrige la faute de saisie d'une zone **active** en gardant son identifiant (les grilles tarifaires qui la référencent la suivent). Le corps est le libellé **complet**, comme à l'ajout (aucun autre champ n'est accepté) : `city` obligatoire, `district` facultatif ou `null` (toute la ville). Pour desservir un autre secteur, on retire la zone et on en ajoute une nouvelle. Pas de version ni d'`If-Match` : si deux corrections de la même zone arrivent ensemble, la dernière l'emporte. Un libellé strictement identique à l'actuel réussit sans rien écrire ni tracer ; une correction de casse ou d'accent seule est une modification. Réponse **200** : la zone, avec le même `id`.
+
+| Statut | Cas |
+| --- | --- |
+| 200 | Zone corrigée, ou libellé inchangé. |
+| 400 | `agencyId` ou `zoneId` non UUID ; champ inconnu, ville ou quartier hors des bornes (2 à 80 caractères), caractère de contrôle ou de format. |
+| 401 | Jeton absent, invalide ou session révoquée. |
+| 403 | Le membre est un agent. |
+| 404 | Agence inconnue ou sans accès, **ou zone inconnue ou d'une autre agence** : même réponse. |
+| 409 | `ZONE_ALREADY_SERVED` (le libellé égale une autre zone **active**, sans tenir compte de la casse, des accents ni des espaces), `ZONE_RETIRED_DUPLICATE` (il égale une zone **retirée** : la réactiver en l'ajoutant de nouveau), `ZONE_RETIRED` (la zone corrigée est retirée). Deux corrections simultanées vers le même libellé : une seule réussit, l'autre reçoit `ZONE_ALREADY_SERVED`. |
 
 ### Lister les zones
 
@@ -238,7 +251,7 @@ Les routes qui renvoient un site posent son `version` dans l'en-tête `ETag` (`"
 
 | Route | Rôles | Effet |
 | --- | --- | --- |
-| `POST /api/v1/agencies/{agencyId}/sites` | propriétaire, administrateur | Crée un site actif (version 1). Corps : `name`, `city`, `address` obligatoires, `phone` facultatif ; aucun autre champ. **201.** |
+| `POST /api/v1/agencies/{agencyId}/sites` | propriétaire, administrateur | Crée un site actif (version 1). Corps : `name`, `city`, `address` obligatoires, `phone` facultatif ; aucun autre champ. Au plus **50 sites actifs** et **200 sites** en tout, désactivés compris. **201.** |
 | `PATCH /api/v1/agencies/{agencyId}/sites/{siteId}` | propriétaire, administrateur | Modification **partielle** d'un site actif, avec `If-Match` = version du site (428 absent, 400 mal formé, 409 `STALE_SITE_VERSION` périmé). `name`, `city`, `address` ne se vident pas ; `phone: null` (ou texte vide) l'efface. Une demande sans changement réel réussit avec la version inchangée. **200.** |
 | `POST /api/v1/agencies/{agencyId}/sites/{siteId}/deactivate` | propriétaire, administrateur | Désactive le site (conservé avec `deactivatedAt`). Sans corps. **200.** |
 | `POST /api/v1/agencies/{agencyId}/sites/{siteId}/reactivate` | propriétaire, administrateur | Réactive un site désactivé. Sans corps. **200.** |
@@ -249,7 +262,7 @@ Les routes qui renvoient un site posent son `version` dans l'en-tête `ETag` (`"
 | 400 | Champ inconnu ou invalide, `If-Match` mal formé, `limit` ou `cursor` invalide, identifiant non UUID. |
 | 401, 403 | Comme pour les zones (agent : 403 sur toute écriture). |
 | 404 | Agence inconnue ou sans accès, **ou site inconnu ou d'une autre agence** : même réponse. |
-| 409 | `SITE_NAME_TAKEN` (création, renommage, ou réactivation alors qu'un site actif porte le nom), `SITE_DEACTIVATED` (modifier ou désactiver un site désactivé), `SITE_ALREADY_ACTIVE` (réactiver un site actif), `LAST_ACTIVE_SITE` (dernier site actif alors que le stockage est actif), `STALE_SITE_VERSION`. |
+| 409 | `SITE_NAME_TAKEN` (création, renommage, ou réactivation alors qu'un site actif porte le nom), `SITE_DEACTIVATED` (modifier ou désactiver un site désactivé), `SITE_ALREADY_ACTIVE` (réactiver un site actif), `LAST_ACTIVE_SITE` (dernier site actif alors que le stockage est actif), `STALE_SITE_VERSION`, `SITE_LIMIT_REACHED` (création ou réactivation au-delà de 50 sites actifs), `SITE_TOTAL_LIMIT_REACHED` (création au-delà de 200 sites ; réactiver un site ne crée pas de ligne). |
 | 428 | `If-Match` absent (PATCH). |
 
 ## Activer et suspendre une capacité
@@ -299,7 +312,7 @@ Configuration minimale (décision D-04) : **livraison** = au moins une zone acti
 - Tant que la **livraison est active**, la dernière zone active ne peut pas être retirée (409 `LAST_ACTIVE_ZONE`).
 - Tant que le **stockage est actif**, le dernier site actif ne peut pas être désactivé (409 `LAST_ACTIVE_SITE`).
 - Suspendue, la capacité ne protège plus rien ; la réactiver revérifie la configuration minimale.
-- Ces règles tiennent en concurrence : toutes les écritures de configuration d'une agence passent par le verrou de la ligne `agencies`, et la base garde des index uniques partiels (zones actives, noms de sites actifs) et la clé `(agence, capacité, numéro de transition)`. Deux activations simultanées ne produisent qu'une activation ; un retrait de la dernière zone et l'activation de la livraison simultanés : l'un des deux est refusé, jamais livraison active sans zone.
+- Ces règles tiennent en concurrence : toutes les écritures de configuration d'une agence passent par le verrou de la ligne `agencies` (pris **après** le contrôle du membership et du rôle, lu sans verrou : un étranger, un ancien membre ou un agent est refusé sans jamais faire attendre personne sur l'agence), et la base garde des index uniques partiels (zones actives, noms de sites actifs) et la clé `(agence, capacité, numéro de transition)`. Deux activations simultanées ne produisent qu'une activation ; un retrait de la dernière zone et l'activation de la livraison simultanés : l'un des deux est refusé, jamais livraison active sans zone.
 
 ### Droits et audit
 
@@ -309,7 +322,7 @@ Configuration minimale (décision D-04) : **livraison** = au moins une zone acti
 | `agent` | oui | 403 |
 | non-membre, ancien membre, autre agence, agence inconnue | 404 | 404 (même réponse) |
 
-L'agence visée vient du chemin, jamais du corps. Chaque action effective écrit une trace d'audit dans la même transaction (`agency.zone_added`, `agency.zone_reactivated`, `agency.zone_retired`, `agency.site_created`, `agency.site_updated`, `agency.site_deactivated`, `agency.site_reactivated`, `agency.capability_enabled`, `agency.capability_suspended`), avec des **noms** de champs ou de capacités seulement (`details.fields`), jamais de villes, d'adresses, de téléphones ni de motifs. Les actions sur une zone ou un site portent aussi l'**identifiant** de la ressource touchée (colonne `resource_id`, opaque : ajout, retrait, réactivation d'une zone ; création, modification, désactivation, réactivation d'un site) ; les actions sans ressource gardent `resource_id` à `NULL`. Un refus (conflit, droit, donnée invalide) et une modification sans effet réel n'écrivent rien.
+L'agence visée vient du chemin, jamais du corps. Chaque action effective écrit une trace d'audit dans la même transaction (`agency.zone_added`, `agency.zone_reactivated`, `agency.zone_renamed`, `agency.zone_retired`, `agency.site_created`, `agency.site_updated`, `agency.site_deactivated`, `agency.site_reactivated`, `agency.capability_enabled`, `agency.capability_suspended`), avec des **noms** de champs ou de capacités seulement (`details.fields`), jamais de villes, d'adresses, de téléphones ni de motifs. Les actions sur une zone ou un site portent aussi l'**identifiant** de la ressource touchée (colonne `resource_id`, opaque : ajout, correction, retrait, réactivation d'une zone ; création, modification, désactivation, réactivation d'un site) ; les actions sans ressource gardent `resource_id` à `NULL`. Un refus (conflit, droit, donnée invalide) et une modification sans effet réel n'écrivent rien.
 
 ## Soumettre l'agence à vérification
 
