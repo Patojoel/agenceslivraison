@@ -148,7 +148,7 @@ Chaque phase B suit ces étapes ; elles sont cochées par lot dans `progress.md`
 - **Règles** : RM-05-05 tarifs propres à chaque agence ; RM-03-05 tarifs affichés non garantis sans devis.
 - **Événements** : projection publique alimentée par `AgencyCapabilityEnabled` (in-process tant qu'aucun besoin inter-domaines n'est validé).
 - **Use cases** : `docs/use-cases/05-tarifs-zones/` et `docs/use-cases/03-marketplace-publique/` (S1, 2026-11-04). Publication tranchée (D-05) : agence soumise publiable avec la mention « non vérifiée ».
-- **À VALIDER** : barèmes (poids, dimensions, distance), taxes, devise et arrondi (D-05) ; grille et devis (D-22) ; fiche publique (D-23) ; recherche publique (D-24) ; modification d'une zone (D-25).
+- **Décisions prises le 2026-11-04** : barème, taxes et arrondi (D-05), grille et devis (D-22), fiche publique (D-23), recherche publique (D-24), modification d’une zone (D-25) — détail dans `progress.md`. Plus aucun À VALIDER bloquant pour B3.
 - **Critère de sortie** : recherches paginées, projections publiques sans fuite.
 
 ### B4 — Clients, profils commerçants, demandes de services (lot 4) — CRITIQUE (données personnelles, marketplace)

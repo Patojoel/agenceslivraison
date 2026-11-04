@@ -18,10 +18,10 @@ Tableau de bord vivant du projet. Le détail de chaque tâche (règles, endpoint
 
 | Élément | Valeur |
 |---|---|
-| Lot backend courant | B3 — tarifs, zones, marketplace publique : S1 terminé (2026-11-04) ; S2 (plan) en attente des réponses D-05 et D-22 à D-25 |
+| Lot backend courant | B3 — tarifs, zones, marketplace publique : S1 terminé, décisions D-05 et D-22 à D-25 prises (2026-11-04) ; S2 (plan) à valider |
 | Branche | `refactor/architecture-normalisee` |
 | Mode de session | light (session du 2026-11-03) |
-| Tâches en cours | `[!]` B3.S2 — plan du lot, bloqué par D-05 et D-22 à D-25 |
+| Tâches en cours | `[~]` B3.S2 — plan du lot (session principale), en attente de validation du user |
 
 ### Refactor architecture + TypeORM — commité (2026-11-03)
 Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranchée en faveur de TypeORM et de l'architecture normalisée. `CLAUDE.md`, les agents (`back-builder`, `archi-reviewer`, `query-perf`), `phases.md` et `backend/docs/` sont alignés. Décision et conventions : [docs/architecture/](docs/architecture/).
@@ -35,7 +35,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | B0 | Socle technique | terminé (sauvegarde à valider en cible) | 11/12 |
 | B1 | Identité, sessions, memberships | terminé, re-vérifié après refactor (rate limit partagé et constats de revue B1.13–B1.14 à traiter) | 11/14 |
 | B2 | Onboarding agence | **terminé** (S1–S10) ; durcissements B2.13 et B2.15 reportés | 13/15 |
-| B3 | Tarifs, zones, marketplace publique | en cours (S1 fait, S2 bloqué par D-05, D-22 à D-25) | 0/15 |
+| B3 | Tarifs, zones, marketplace publique | en cours (S1 fait, S2 en cours) | 0/15 |
 | B4 | Clients, commerçants, demandes | à faire | 0/14 |
 | B5 | Commandes, colis, suivi | à faire | 0/17 |
 | B6 | Livreurs, missions | à faire | 0/18 |
@@ -111,7 +111,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [ ] B2.15 *(contre-revue sécurité, durcissement — avant tout nouveau rôle d'agence en B6 ou B10)* `managesAgencyIdentity` en liste autorisée exhaustive (`Record<AgencyRole, boolean>`), un test parcourt `AGENCY_ROLES`
 
 ### B3 — Tarifs, zones, marketplace publique (CRITIQUE)
-Étapes : [x] S1 use cases (12 UC, 138 scénarios, 128 tests prévus ; `docs/use-cases/05-tarifs-zones/`, `docs/use-cases/03-marketplace-publique/` ; UC-05-01 et UC-05-03 complètent UC-02-03, D-15) · [!] S2 (D-05, D-22 à D-25) · [ ] S3 · [ ] S4 · [ ] S5 · [ ] S6 · [ ] S7 · [ ] S8 · [ ] S9 · [ ] S10
+Étapes : [x] S1 use cases (12 UC, 138 scénarios, 128 tests prévus ; `docs/use-cases/05-tarifs-zones/`, `docs/use-cases/03-marketplace-publique/` ; UC-05-01 et UC-05-03 complètent UC-02-03, D-15) · [~] S2 · [ ] S3 · [ ] S4 · [ ] S5 · [ ] S6 · [ ] S7 · [ ] S8 · [ ] S9 · [ ] S10
 - [ ] B3.1 Créer zone
 - [ ] B3.2 Modifier zone
 - [ ] B3.3 Désactiver zone
@@ -348,11 +348,6 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 |---|---|---|---|
 | D-02 | Stockage des jetons côté web : BFF avec cookie `HttpOnly` ou cookie posé par l'API + CSRF | F0.4, F1.1, F2.2 | ouverte |
 | D-03 | Mobile : deux applications ou une seule avec deux profils | M0.1 | ouverte (recommandé : deux) |
-| D-05 | Barèmes (poids, dimensions, distance), taxes, devise et arrondi — hypothèses Q-20 à Q-23 des use cases : une grille de livraison par agence, tranches de poids par zone de destination, poids volumétrique facultatif, FCFA entiers taxes comprises, arrondi au gramme supérieur | B3.4 à B3.8 | ouverte (la règle de publication est tranchée, voir « Décisions prises ») |
-| D-22 | Grille et devis (Q-24, Q-26, Q-29 à Q-33, Q-35) : version applicable immédiatement, pas de tarif de stockage, destinataire, validité 7 jours, prix manuel motivé, qui émet et enregistre l'acceptation, acceptation refusée si zone retirée ou livraison suspendue, référence `DEV-AAAA-NNNNNN` | B3.4 à B3.8 | ouverte |
-| D-23 | Fiche publique (Q-28, Q-36 à Q-41, Q-45) : champs publiés, slug stable jamais réattribué, propriétaire seul, capacité active exigée, nom provisoire, pas de simulation publique, B2.13 avant ou avec B3.9 | B3.9, B3.12 | ouverte |
-| D-24 | Recherche publique (Q-42 à Q-44) : tri alphabétique, recherche sur le nom, filtre par ville des sites actifs, 60 requêtes par minute et par adresse | B3.10, B3.11, B3.13 | ouverte |
-| D-25 | Modifier une zone (Q-27, Q-47) : correction du libellé avec le même identifiant, unicité contre toute zone de l'agence, la dernière correction l'emporte | B3.2 | ouverte |
 | D-06 | Acceptation automatique ou manuelle des demandes | B4 | ouverte |
 | D-07 | Statuts et transitions des commandes et colis ; contenu et durée du suivi public | B5 | ouverte |
 | D-08 | Preuves de livraison acceptées et conservation ; géolocalisation ; stockage des fichiers | B6, M1.6 | ouverte |
@@ -365,6 +360,12 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | D-12 | Détecter une migration TypeORM modifiée après application (empreinte par migration) ; afficher ou non au migrateur le motif d'un refus d'adoption Drizzle (message sans donnée) | B10.18 | ouverte |
 
 Décisions prises :
+- 2026-11-04 — **D-05 (barème)**, **D-22**, **D-23**, **D-24**, **D-25** : hypothèses par défaut des use cases B3 retenues.
+  - D-05 : une grille de livraison par agence ; prix par tranches de poids (borne incluse) et par zone de destination, sans distance ni zone d'origine ; poids volumétrique facultatif (diviseur fixé par version, dimensions en cm) ; francs CFA entiers de 1 à 10 000 000, saisis taxes comprises, sans calcul de taxe ; poids taxable arrondi au gramme supérieur ; une nouvelle version s'applique immédiatement ; pas de tarif de stockage en B3.
+  - D-22 : destinataire = nom + téléphone `+237` facultatif, privés à l'agence ; devis valable 7 jours ; prix manuel permis avec motif ; tout membre actif (agent compris) émet et enregistre l'acceptation au nom du client ; acceptation refusée si la zone est retirée ou la livraison suspendue ; aucune commande créée en B3 ; référence `DEV-AAAA-NNNNNN`.
+  - D-23 : fiche publique = slug, nom, description, mention « non vérifiée », capacités, zones, villes des sites, tarifs « à partir de » ; raison sociale, contacts et identifiant interne restent privés ; slug stable jamais réattribué ; propriétaire seul publie ou retire ; au moins une capacité active (fiche masquée sinon) ; nom provisoire (« Agence » + 8 premiers caractères de l'identifiant) non publiable ; pas de simulation publique ; B2.13 livré avant ou avec B3.9.
+  - D-24 : tri alphabétique, recherche sur le nom, filtre par ville incluant la ville des sites actifs, 60 requêtes par minute et par adresse.
+  - D-25 : modifier une zone = corriger son libellé avec le même identifiant ; libellé refusé s'il égale une autre zone de l'agence (active ou retirée) ; la dernière correction concurrente l'emporte.
 - 2026-11-04 — **D-05 (publication)** : une agence est publiable dans l'annuaire dès qu'elle est **soumise** et que son propriétaire publie sa fiche, avec une mention visible « non vérifiée » jusqu'à l'approbation par l'admin plateforme (B10) ; l'annuaire fonctionne dès B3. Barèmes, taxes et arrondi restent ouverts.
 - 2026-11-04 — **D-20** : seuls le propriétaire et l'administrateur lisent l'identité complète de l'agence (`GET /agencies/{id}` : téléphone, e-mail, RCCM, NIU) ; l'agent reçoit 403 et garde l'état d'onboarding, les zones, les sites et la liste des membres (tâche B2.14).
 - 2026-11-04 — **D-17** : configuration minimale absente à l'activation d'une capacité → 400 `CAPABILITY_PREREQUISITE_MISSING` avec `missing` (comme la soumission incomplète, 400 `SUBMISSION_INCOMPLETE`) ; seul le dernier motif de suspension est exposé.
@@ -383,6 +384,7 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-04 | user + session principale | Décisions D-05 (barème), D-22, D-23, D-24, D-25 | Hypothèses par défaut des use cases B3 retenues ; B3.S2 (plan) lancé | aucune |
 | 2026-11-04 | `use-case-writer` (mode light, rapport appliqué par la session principale) | B3.S1 — use cases tarifs, zones, marketplace publique | 12 UC (UC-05-01 et UC-05-03 en complément de UC-02-03, D-15), 138 scénarios (109 scénarios + 29 plans), 128 tests TDD prévus, 21 anomalies (A-18 à A-38), 28 questions (Q-20 à Q-47) ; couverture UC 12/12, RM 7/7 ; tâches B3.14 et B3.15 ajoutées (plan modifié, `phases.md` mis à jour) ; note B3.9 alignée sur D-05 (A-20) ; décisions D-22 à D-25 ouvertes ; en attente du user | aucune (documentation) |
 | 2026-11-04 | user + session principale | D-05 (règle de publication) ; push de la branche | Agence soumise publiable avec la mention « non vérifiée » ; barèmes, taxes et arrondi encore ouverts | `git push` |
 | 2026-11-04 | Claude (session principale) | B2.S10 — clôture du lot B2 | Lot B2 terminé : 13 tâches faites, durcissements B2.13 et B2.15 reportés ; critère de sortie (brouillon → soumise, validations, isolation entre agences) vérifié en E2E | `npm run lint` OK · `npm run typecheck` OK · `npm test` 220/220 · `npm run build` OK · `npm audit --omit=dev` 0 · `docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from test-api` exit 0 · `compose down` |
