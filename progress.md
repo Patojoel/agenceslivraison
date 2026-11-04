@@ -346,7 +346,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 |---|---|---|---|
 | D-02 | Stockage des jetons côté web : BFF avec cookie `HttpOnly` ou cookie posé par l'API + CSRF | F0.4, F1.1, F2.2 | ouverte |
 | D-03 | Mobile : deux applications ou une seule avec deux profils | M0.1 | ouverte (recommandé : deux) |
-| D-05 | Barèmes, taxes, arrondi ; seules les agences approuvées sont-elles publiables ? | B3 | ouverte |
+| D-05 | Barèmes (poids, dimensions, distance), taxes, devise et arrondi | B3 | ouverte (la règle de publication est tranchée, voir « Décisions prises ») |
 | D-06 | Acceptation automatique ou manuelle des demandes | B4 | ouverte |
 | D-07 | Statuts et transitions des commandes et colis ; contenu et durée du suivi public | B5 | ouverte |
 | D-08 | Preuves de livraison acceptées et conservation ; géolocalisation ; stockage des fichiers | B6, M1.6 | ouverte |
@@ -359,6 +359,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | D-12 | Détecter une migration TypeORM modifiée après application (empreinte par migration) ; afficher ou non au migrateur le motif d'un refus d'adoption Drizzle (message sans donnée) | B10.18 | ouverte |
 
 Décisions prises :
+- 2026-11-04 — **D-05 (publication)** : une agence est publiable dans l'annuaire dès qu'elle est **soumise** et que son propriétaire publie sa fiche, avec une mention visible « non vérifiée » jusqu'à l'approbation par l'admin plateforme (B10) ; l'annuaire fonctionne dès B3. Barèmes, taxes et arrondi restent ouverts.
 - 2026-11-04 — **D-20** : seuls le propriétaire et l'administrateur lisent l'identité complète de l'agence (`GET /agencies/{id}` : téléphone, e-mail, RCCM, NIU) ; l'agent reçoit 403 et garde l'état d'onboarding, les zones, les sites et la liste des membres (tâche B2.14).
 - 2026-11-04 — **D-17** : configuration minimale absente à l'activation d'une capacité → 400 `CAPABILITY_PREREQUISITE_MISSING` avec `missing` (comme la soumission incomplète, 400 `SUBMISSION_INCOMPLETE`) ; seul le dernier motif de suspension est exposé.
 - 2026-11-04 — **D-19** : toute agence doit avoir au moins un site actif pour être soumise, quelles que soient ses capacités (RG-02-05-02).
@@ -376,6 +377,7 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-04 | user + session principale | D-05 (règle de publication) ; push de la branche | Agence soumise publiable avec la mention « non vérifiée » ; barèmes, taxes et arrondi encore ouverts | `git push` |
 | 2026-11-04 | Claude (session principale) | B2.S10 — clôture du lot B2 | Lot B2 terminé : 13 tâches faites, durcissements B2.13 et B2.15 reportés ; critère de sortie (brouillon → soumise, validations, isolation entre agences) vérifié en E2E | `npm run lint` OK · `npm run typecheck` OK · `npm test` 220/220 · `npm run build` OK · `npm audit --omit=dev` 0 · `docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from test-api` exit 0 · `compose down` |
 | 2026-11-04 | `security-reviewer` (mode light, rapport appliqué par la session principale) | B2.S9 — contre-revue des corrections B2.11, B2.12, B2.14 | C1, C2 et D-20 fermés ; aucun critique ni à corriger ; 3 durcissements (B2.15, caractères refusés unifiés → B2.13, `lock_timeout` → B10.18) | `git show 2411740 / 4d33a6a -- backend`, lecture du code ; schéma Zod exécuté sur 19 cas limites ; aucun test relancé |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2.14 — identité d'agence réservée au propriétaire et à l'administrateur (D-20) | Vert ; rouges constatés en unitaire (2 échecs sur 3) et en E2E (`200 !== 403`) ; aucune migration ; règle `managesAgencyIdentity` commune à la lecture et à l'édition | `npm run lint` OK · `npm run typecheck` OK · `npm test` 220/220 (relancé par la session principale) · `npm run build` OK · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
