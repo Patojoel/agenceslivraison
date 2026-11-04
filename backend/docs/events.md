@@ -25,6 +25,8 @@ Le seul consommateur aujourd'hui est l'audit. `IdentityAuditSubscriber`, `Agency
 | `AgencyCapabilitySuspended` | `Agency.suspendCapability` | `agencyId`, `actorId`, `capability` | `agency.capability_suspended` · actorId · agencyId · — · `details = { "fields": [capability] }` |
 | `RateCardCreated` | `RateCard.create` | `agencyId`, `rateCardId`, `actorId`, `version` (1) | `pricing.rate_card_created` · actorId · agencyId · — · `resource_id = rateCardId` · `details = { "fields": ["version:1"] }` (aucun prix, poids ni zone) |
 | `RateCardVersioned` | `RateCard.publish` (seulement si le barème change réellement) | `agencyId`, `rateCardId`, `actorId`, `version` (le nouveau numéro) | `pricing.rate_card_versioned` · actorId · agencyId · — · `resource_id = rateCardId` · `details = { "fields": ["version:N"] }` |
+| `QuoteIssued` | `Quote.issue` | `agencyId`, `quoteId`, `actorId` (aucun nom, téléphone ni montant) | `pricing.quote_issued` · actorId · agencyId · — · `resource_id = quoteId` · pas de `details` |
+| `QuoteAccepted` | `Quote.accept` (une seule fois ; un refus n'émet rien) | `agencyId`, `quoteId`, `actorId` | `pricing.quote_accepted` · actorId · agencyId · — · `resource_id = quoteId` · pas de `details` |
 | `InvitationIssued` | `Invitation.issue` | `agencyId`, `actorId` | `invitation.created` · actorId · agencyId · — |
 | `InvitationAccepted` | `Invitation.accept` | `agencyId`, `userId` | `invitation.accepted` · userId · agencyId · userId |
 | `MembershipRoleChanged` | `AgencyTeam.changeRole` | `agencyId`, `actorId`, `subjectUserId` | `membership.role_changed` · actorId · agencyId · subjectUserId |

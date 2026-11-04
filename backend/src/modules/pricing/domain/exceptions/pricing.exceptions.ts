@@ -40,3 +40,29 @@ export class RateCardAlreadyExists extends DomainException {
 export class StaleRateCardVersion extends DomainException {
   constructor() { super('conflict', 'The rate card was modified in the meantime', { code: 'STALE_RATE_CARD_VERSION' }); }
 }
+
+export class QuoteNotFound extends DomainException {
+  constructor() { super('not_found', 'Quote not found'); }
+}
+
+/** No price can be calculated for these parcels and no manual price was given. */
+export class QuoteNotPriceable extends DomainException {
+  constructor() { super('invalid', 'This quote has no price: give a manual price with its reason', { code: 'QUOTE_NOT_PRICEABLE' }); }
+}
+
+export class QuoteAlreadyAccepted extends DomainException {
+  constructor() { super('conflict', 'This quote was already accepted', { code: 'QUOTE_ALREADY_ACCEPTED' }); }
+}
+
+export class QuoteExpired extends DomainException {
+  constructor() { super('conflict', 'This quote has expired', { code: 'QUOTE_EXPIRED' }); }
+}
+
+/** A suspended (or never activated) delivery capability takes no new commitment. */
+export class DeliveryNotActive extends DomainException {
+  constructor() { super('conflict', 'The delivery capability of this agency is not active', { code: 'DELIVERY_NOT_ACTIVE' }); }
+}
+
+export class QuoteIdempotencyKeyReused extends DomainException {
+  constructor() { super('conflict', 'This idempotency key was already used for another quote', { code: 'IDEMPOTENCY_KEY_REUSED' }); }
+}

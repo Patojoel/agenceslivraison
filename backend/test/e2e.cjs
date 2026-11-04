@@ -1455,6 +1455,372 @@ const { Client } = require('pg');
         activeOne = previousActive;
       }
 
+      // B3.7, B3.8, B3.15: quotes — issuing, accepting, reading and listing.
+      {
+        const quoteAgency = await configAgency();
+        const previousActive = activeOne;
+        activeOne = quoteAgency;
+        const year = new Date().getUTCFullYear();
+        const zoneOf = async (agency, body) => (await (await addZone(agency, ownerAccess, body)).json());
+        const patchZone = (agency, zone, access, body) => act('PATCH', `${agency}/zones/${zone}`, access, body);
+        const akwaZone = await zoneOf(quoteAgency, { city: 'Douala', district: 'Akwa' });
+        const bonaZone = await zoneOf(quoteAgency, { city: 'Douala', district: 'Bonabéri' });
+        const deidoZone = await zoneOf(quoteAgency, { city: 'Douala', district: 'Deïdo' });
+        const neighbour = await configAgency();
+        const foreignZone = await zoneOf(neighbour, { city: 'Yaoundé', district: 'Bastos' });
+        const rateCardBody = (akwaPrice = 1000) => ({ lines: [
+          { zoneId: akwaZone.id, tiers: [{ upTo: '1 kg', price: akwaPrice }, { upTo: '5 kg', price: 1500 }, { upTo: '10 kg', price: 2500 }, { upTo: '30 kg', price: 5000 }] },
+          { zoneId: bonaZone.id, tiers: [{ upTo: '1 kg', price: 1500 }] },
+        ] });
+        const parcel = (weight, dimensions) => (dimensions === undefined ? { weight } : { weight, dimensions });
+        const quoteBody = (extra = {}) => ({ recipient: { name: 'Jean Kamga', phone: '+237 699 00 11 22' }, zoneId: akwaZone.id, parcels: [parcel('0,8 kg'), parcel('3 kg')], ...extra });
+        const issue = (agency, access, body, key) => act('POST', `${agency}/quotes`, access, body, key === undefined ? {} : { 'idempotency-key': key });
+        const acceptQuote = (agency, access, id, body) => act('POST', `${agency}/quotes/${id}/accept`, access, body);
+        const readQuote = (agency, access, id) => act('GET', `${agency}/quotes/${id}`, access);
+        const listQuotes = (agency, access, query = '') => act('GET', `${agency}/quotes${query}`, access);
+        const simulateQuote = (agency, access, body) => act('POST', `${agency}/quotes/preview`, access, body);
+        const quoteRows = async (agency) => (await agencyPool.query("SELECT count(*)::int AS total, (count(*) FILTER (WHERE status = 'accepted'))::int AS accepted FROM quotes WHERE agency_id = $1", [agency])).rows[0];
+        const quoteTrail = async (agency) => (await agencyPool.query("SELECT action, user_id, resource_id, details FROM identity_audit WHERE agency_id = $1 AND action ~ '^pricing\\.quote_' ORDER BY occurred_at, id", [agency])).rows;
+        const quoteRow = async (id) => (await agencyPool.query('SELECT * FROM quotes WHERE id = $1', [id])).rows[0];
+        const issued = async (agency, access, body, key) => {
+          const response = await issue(agency, access, body, key);
+          assert.equal(response.status, 201, 'the quote is issued');
+          return response.json();
+        };
+
+        // The rate card exists, the delivery capability is not active yet: nothing can be quoted.
+        assert.equal((await act('POST', `${quoteAgency}/rate-card`, ownerAccess, rateCardBody())).status, 201);
+        assert.deepEqual(await quoteRows(quoteAgency), { total: 0, accepted: 0 });
+        await problemOf(await issue(quoteAgency, agentAccess, quoteBody()), 409, 'DELIVERY_NOT_ACTIVE', 'no quote while the delivery capability is not active');
+        assert.deepEqual(await quoteRows(quoteAgency), { total: 0, accepted: 0 }, 'a refusal writes nothing');
+        assert.equal((await enable(quoteAgency, 'delivery', ownerAccess)).status, 200);
+        assert.equal((await enable(neighbour, 'delivery', ownerAccess)).status, 200);
+
+        // Isolation and authentication of every route, before anything is written.
+        await assertHidden('issue a quote', 'POST', agency => `${agency}/quotes`, quoteBody());
+        await assertHidden('list the quotes', 'GET', agency => `${agency}/quotes`);
+        await assertHidden('read a quote', 'GET', agency => `${agency}/quotes/${randomUUID()}`);
+        await assertHidden('accept a quote', 'POST', agency => `${agency}/quotes/${randomUUID()}/accept`);
+        assert.deepEqual(await quoteRows(quoteAgency), { total: 0, accepted: 0 }, 'refused callers write nothing');
+        assert.deepEqual(await quoteTrail(quoteAgency), [], 'and leave no trace');
+
+        // An agent issues a quote: reference, calculation frozen, one week of validity.
+        const created = await issue(quoteAgency, agentAccess, quoteBody());
+        assert.equal(created.status, 201, 'an agent issues a quote');
+        assert.match(created.headers.get('cache-control'), /no-store/);
+        const quote1 = await created.json();
+        assert.match(quote1.id, UUID);
+        assert.equal(quote1.reference, `DEV-${year}-000001`);
+        assert.deepEqual([quote1.status, quote1.total, quote1.calculatedTotal, quote1.rateCardVersion, quote1.pricing, quote1.manualPrice, quote1.manualPriceReason, quote1.currency, quote1.issuedBy, quote1.acceptedAt, quote1.acceptedBy],
+          ['issued', 2500, 2500, 1, 'priced', null, null, 'XAF', invitedUser, null, null]);
+        assert.deepEqual(quote1.recipient, { name: 'Jean Kamga', phone: '+237699001122' });
+        assert.deepEqual(quote1.zone, { id: akwaZone.id, city: 'Douala', district: 'Akwa' });
+        assert.deepEqual(quote1.parcels, [{ weightGrams: 800, dimensions: null, taxableGrams: 800, price: 1000 }, { weightGrams: 3000, dimensions: null, taxableGrams: 3000, price: 1500 }]);
+        assert.equal(Date.parse(quote1.validUntil) - Date.parse(quote1.issuedAt), 7 * 86400000, 'a quote is valid for seven days');
+        assert.ok(Math.abs(Date.now() - Date.parse(quote1.issuedAt)) < 60000);
+        const simulated = await (await simulateQuote(quoteAgency, agentAccess, { zoneId: akwaZone.id, parcels: [parcel('0,8 kg'), parcel('3 kg')] })).json();
+        assert.equal(simulated.total, quote1.total, 'the quote has the price of the simulation');
+        assert.deepEqual((await quoteTrail(quoteAgency)).map(entry => [entry.action, entry.user_id, entry.resource_id, entry.details]), [['pricing.quote_issued', invitedUser, quote1.id, null]]);
+
+        // Invalid bodies: 400, nothing written, no number consumed.
+        const recipient = (extra) => ({ name: 'Jean Kamga', phone: null, ...extra });
+        const invalidQuotes = {
+          'a field that is not known': quoteBody({ status: 'accepted' }),
+          'no recipient': (({ recipient: _recipient, ...rest }) => rest)(quoteBody()),
+          'a recipient field that is not known': quoteBody({ recipient: recipient({ email: 'jean@example.com' }) }),
+          'a name of one character': quoteBody({ recipient: recipient({ name: 'J' }) }),
+          'a name of 121 characters': quoteBody({ recipient: recipient({ name: 'a'.repeat(121) }) }),
+          'a name with a control character': quoteBody({ recipient: recipient({ name: 'Jean\u0000Kamga' }) }),
+          'a name with a bidirectional mark': quoteBody({ recipient: recipient({ name: 'Jean‮Kamga' }) }),
+          'a foreign phone number': quoteBody({ recipient: recipient({ phone: '+33612345678' }) }),
+          'an empty phone number': quoteBody({ recipient: recipient({ phone: '' }) }),
+          'no zone': (({ zoneId: _zone, ...rest }) => rest)(quoteBody()),
+          'a zone that is not an identifier': quoteBody({ zoneId: 'akwa' }),
+          'no parcel': quoteBody({ parcels: [] }),
+          'twenty-one parcels': quoteBody({ parcels: Array.from({ length: 21 }, () => parcel('1 kg')) }),
+          'a weight without unit': quoteBody({ parcels: [parcel('3')] }),
+          'a weight of zero': quoteBody({ parcels: [parcel('0 kg')] }),
+          'dimensions out of range': quoteBody({ parcels: [parcel('1 kg', { length: 501, width: 1, height: 1, unit: 'cm' })] }),
+          'a manual price without reason': quoteBody({ manualPrice: { price: 2000 } }),
+          'a manual price with a reason of two characters': quoteBody({ manualPrice: { price: 2000, reason: 'ok' } }),
+          'a manual price of zero': quoteBody({ manualPrice: { price: 0, reason: 'client régulier' } }),
+          'a manual price with decimals': quoteBody({ manualPrice: { price: 2000.5, reason: 'client régulier' } }),
+          'a manual price over 10 000 000': quoteBody({ manualPrice: { price: 10000001, reason: 'client régulier' } }),
+          'a manual price written as text': quoteBody({ manualPrice: { price: '2000', reason: 'client régulier' } }),
+          'a reason with a line break': quoteBody({ manualPrice: { price: 2000, reason: 'client\nrégulier' } }),
+          'a body that is not an object': [],
+        };
+        for (const [what, body] of Object.entries(invalidQuotes)) assert.equal((await issue(quoteAgency, agentAccess, body)).status, 400, `issuing refuses ${what}`);
+        assert.equal((await issue(quoteAgency, agentAccess, undefined)).status, 400, 'issuing refuses an empty body');
+        assert.equal((await issue(quoteAgency, null, quoteBody())).status, 401, 'issuing needs a session');
+        assert.equal((await issue(quoteAgency, agentAccess, quoteBody(), 'short')).status, 400, 'a malformed Idempotency-Key is refused');
+        assert.deepEqual(await quoteRows(quoteAgency), { total: 1, accepted: 0 }, 'invalid bodies write nothing');
+
+        // Zones: another agency, unknown, retired. Prices: out of the scale, without tariff.
+        const foreign = await issue(quoteAgency, agentAccess, quoteBody({ zoneId: foreignZone.id }));
+        await problemOf(foreign, 404, undefined, 'a zone of another agency is not found');
+        const unknownZone = await issue(quoteAgency, agentAccess, quoteBody({ zoneId: '00000000-0000-4000-8000-0000000000fe' }));
+        assert.deepEqual(withoutEcho(await unknownZone.json()), withoutEcho(await (await issue(quoteAgency, agentAccess, quoteBody({ zoneId: foreignZone.id }))).json()), 'a zone of another agency answers like an unknown zone');
+        const bepandaZone = await zoneOf(quoteAgency, { city: 'Douala', district: 'Bépanda' });
+        assert.equal((await retireZone(quoteAgency, bepandaZone.id, ownerAccess)).status, 200);
+        await problemOf(await issue(quoteAgency, agentAccess, quoteBody({ zoneId: bepandaZone.id, manualPrice: { price: 1000, reason: 'zone retirée' } })), 409, 'ZONE_RETIRED', 'a retired zone cannot be quoted, even by hand');
+        await problemOf(await issue(quoteAgency, agentAccess, quoteBody({ parcels: [parcel('31 kg')] })), 400, 'QUOTE_NOT_PRICEABLE', 'a parcel out of the scale needs a manual price');
+        await problemOf(await issue(quoteAgency, agentAccess, quoteBody({ zoneId: deidoZone.id })), 400, 'QUOTE_NOT_PRICEABLE', 'a zone without tariff needs a manual price');
+        assert.deepEqual(await quoteRows(quoteAgency), { total: 1, accepted: 0 }, 'refusals write nothing');
+        const heavy = await issued(quoteAgency, agentAccess, quoteBody({ parcels: [parcel('31 kg')], manualPrice: { price: 7000, reason: 'gros colis' } }));
+        assert.deepEqual([heavy.reference, heavy.total, heavy.pricing, heavy.calculatedTotal, heavy.manualPrice, heavy.manualPriceReason, heavy.parcels[0].price], [`DEV-${year}-000002`, 7000, 'out_of_scale', null, 7000, 'gros colis', null]);
+        const negotiated = await issued(quoteAgency, adminAccess, quoteBody({ manualPrice: { price: 2000, reason: 'client régulier' } }));
+        assert.deepEqual([negotiated.total, negotiated.calculatedTotal, negotiated.manualPrice, negotiated.manualPriceReason, negotiated.pricing], [2000, 2500, 2000, 'client régulier', 'priced']);
+        const byHand = await issued(quoteAgency, ownerAccess, quoteBody({ zoneId: deidoZone.id, manualPrice: { price: 1800, reason: 'zone proche' } }));
+        assert.deepEqual([byHand.pricing, byHand.calculatedTotal, byHand.total, byHand.rateCardVersion, byHand.parcels.map(item => item.price)], ['no_tariff', null, 1800, 1, [null, null]]);
+        const withDimensions = await issued(quoteAgency, ownerAccess, quoteBody({ parcels: [parcel('0,5 kg', { length: 30, width: 20, height: 10, unit: 'cm' })] }));
+        assert.deepEqual(withDimensions.parcels, [{ weightGrams: 500, dimensions: { length: 30, width: 20, height: 10 }, taxableGrams: 500, price: 1000 }]);
+
+        // Idempotency-Key: same key and same content, same quote; other content, conflict; concurrent sends, one quote.
+        const keyedBody = quoteBody({ recipient: { name: 'Awa Ngono', phone: null } });
+        const keyed = await issued(quoteAgency, agentAccess, keyedBody, 'k-2026-11-10-01');
+        const before = await quoteRows(quoteAgency);
+        const replay = await issue(quoteAgency, agentAccess, keyedBody, 'k-2026-11-10-01');
+        assert.equal(replay.status, 200, 'a replay is answered with the quote of the first send');
+        assert.deepEqual(await replay.json(), keyed);
+        assert.deepEqual(await quoteRows(quoteAgency), before, 'a replay writes nothing');
+        await problemOf(await issue(quoteAgency, agentAccess, quoteBody({ recipient: { name: 'Awa Ngono', phone: null }, parcels: [parcel('1 kg')] }), 'k-2026-11-10-01'), 409, 'IDEMPOTENCY_KEY_REUSED', 'the same key for another quote');
+        await problemOf(await issue(quoteAgency, agentAccess, quoteBody({ recipient: { name: 'Autre Client', phone: null } }), 'k-2026-11-10-01'), 409, 'IDEMPOTENCY_KEY_REUSED', 'the same key for another recipient');
+        assert.deepEqual(await quoteRows(quoteAgency), before, 'a conflict writes nothing');
+        assert.equal((await issued(quoteAgency, adminAccess, keyedBody, 'k-2026-11-10-01')).id !== keyed.id, true, 'a key belongs to the person who sent it');
+        const raceKey = await Promise.all([1, 2, 3].map(() => issue(quoteAgency, agentAccess, quoteBody({ recipient: { name: 'Paul Mbarga', phone: null } }), 'k-2026-11-10-02')));
+        assert.deepEqual(raceKey.map(response => response.status).sort(), [200, 200, 201], 'simultaneous sends with one key: one is created, the others replay it');
+        assert.equal(new Set((await Promise.all(raceKey.map(response => response.json()))).map(item => item.id)).size, 1, 'and they all answer the same quote');
+        assert.equal((await quoteRows(quoteAgency)).total, before.total + 2, 'one quote for the three sends, one for the other actor');
+
+        // Simultaneous emissions: distinct, consecutive references.
+        const emissionsBefore = (await quoteRows(quoteAgency)).total;
+        const simultaneous = await Promise.all([ownerAccess, adminAccess, agentAccess, ownerAccess, adminAccess, agentAccess].map((access, index) => issue(quoteAgency, access, quoteBody({ recipient: { name: `Client ${index + 1}`, phone: null } }))));
+        assert.deepEqual(simultaneous.map(response => response.status), [201, 201, 201, 201, 201, 201], 'simultaneous emissions all succeed');
+        const simultaneousQuotes = await Promise.all(simultaneous.map(response => response.json()));
+        assert.equal(new Set(simultaneousQuotes.map(item => item.reference)).size, 6, 'six distinct references');
+        assert.equal((await quoteRows(quoteAgency)).total, emissionsBefore + 6);
+
+        // Another agency has its own quotes and its own numbering.
+        const foreignQuote = await issued(neighbour, ownerAccess, { recipient: { name: 'Marie Etoa', phone: null }, zoneId: foreignZone.id, parcels: [parcel('1 kg')], manualPrice: { price: 3000, reason: 'tarif convenu' } });
+        assert.equal(foreignQuote.reference, `DEV-${year}-000001`, 'each agency counts its own quotes');
+
+        // Reading: every active member; a quote of another agency is not found, like an unknown one.
+        for (const access of [ownerAccess, adminAccess, agentAccess]) {
+          const read = await readQuote(quoteAgency, access, quote1.id);
+          assert.equal(read.status, 200);
+          assert.match(read.headers.get('cache-control'), /no-store/);
+          assert.deepEqual(await read.json(), quote1);
+        }
+        const foreignRead = await readQuote(quoteAgency, ownerAccess, foreignQuote.id);
+        await problemOf(foreignRead, 404, undefined, 'a quote of another agency is not found');
+        assert.deepEqual(withoutEcho(await (await readQuote(quoteAgency, ownerAccess, foreignQuote.id)).json()), withoutEcho(await (await readQuote(quoteAgency, ownerAccess, '00000000-0000-4000-8000-0000000000fc')).json()), 'and answers like an unknown quote');
+        await problemOf(await readQuote(neighbour, ownerAccess, quote1.id), 404, undefined, 'the quote is not found through the other agency either');
+        assert.equal((await readQuote(quoteAgency, ownerAccess, 'not-a-uuid')).status, 400);
+        assert.equal((await readQuote(quoteAgency, null, quote1.id)).status, 401);
+        for (const access of [outsiderAccess, formerAccess]) await problemOf(await readQuote(quoteAgency, access, quote1.id), 404, undefined, 'no access, no quote');
+        const foreignAccept = await acceptQuote(quoteAgency, ownerAccess, foreignQuote.id);
+        await problemOf(foreignAccept, 404, undefined, 'a quote of another agency cannot be accepted');
+        assert.equal((await quoteRow(foreignQuote.id)).status, 'issued', 'and stays as it was');
+
+        // Listing: the most recent first, by cursor, only this agency, summaries only.
+        const expectedOrder = (await agencyPool.query('SELECT id FROM quotes WHERE agency_id = $1 ORDER BY issued_at DESC, id DESC', [quoteAgency])).rows.map(row => row.id);
+        assert.ok(expectedOrder.length >= 12);
+        const firstPage = await listQuotes(quoteAgency, agentAccess, '?limit=5');
+        assert.equal(firstPage.status, 200);
+        assert.match(firstPage.headers.get('cache-control'), /no-store/);
+        const page = await firstPage.json();
+        assert.deepEqual(Object.keys(page).sort(), ['hasMore', 'items', 'nextCursor']);
+        assert.deepEqual(Object.keys(page.items[0]).sort(), ['acceptedAt', 'currency', 'id', 'issuedAt', 'recipientName', 'reference', 'status', 'total', 'validUntil', 'zone']);
+        const seen = [];
+        let current = page;
+        let pages = 1;
+        for (;;) {
+          seen.push(...current.items.map(item => item.id));
+          assert.equal(current.hasMore, current.nextCursor !== null, 'hasMore and nextCursor agree');
+          if (!current.hasMore) break;
+          assert.equal(current.items.length, 5, 'a page that has a successor is full');
+          current = await (await listQuotes(quoteAgency, agentAccess, `?limit=5&cursor=${encodeURIComponent(current.nextCursor)}`)).json();
+          pages += 1;
+        }
+        assert.deepEqual(seen, expectedOrder, 'every quote of the agency, once, the most recent first');
+        assert.ok(pages >= 3 && !seen.includes(foreignQuote.id), 'several pages, and no quote of another agency');
+        const defaults = await (await listQuotes(quoteAgency, ownerAccess)).json();
+        assert.deepEqual(defaults.items.map(item => item.id), expectedOrder.slice(0, 20), 'twenty by default');
+        for (const query of ['?limit=0', '?limit=101', '?limit=abc', '?limit=1.5', '?cursor=garbage', '?cursor=', `?cursor=${Buffer.from('x|y').toString('base64url')}`]) assert.equal((await listQuotes(quoteAgency, ownerAccess, query)).status, 400, `the list refuses ${query}`);
+        assert.deepEqual((await (await listQuotes(neighbour, ownerAccess)).json()).items.map(item => item.id), [foreignQuote.id], 'the other agency lists its own quote only');
+        for (const access of [outsiderAccess, formerAccess]) await problemOf(await listQuotes(quoteAgency, access), 404, undefined, 'no access, no list');
+
+        // The index serves the list: scanned backwards, without a sort.
+        const explainer = await agencyPool.connect();
+        try {
+          await explainer.query('BEGIN');
+          await explainer.query('SET LOCAL enable_seqscan = off');
+          const plan = (await explainer.query(`EXPLAIN SELECT id, reference, issued_at FROM quotes WHERE agency_id = '${quoteAgency}' ORDER BY issued_at DESC, id DESC LIMIT 6`)).rows.map(row => row['QUERY PLAN']).join('\n');
+          assert.match(plan, /quotes_agency_issued_at_id_idx/);
+          assert.doesNotMatch(plan, /Sort/);
+        } finally {
+          await explainer.query('ROLLBACK').catch(() => undefined);
+          explainer.release();
+        }
+
+        // Accepting: any active member, on behalf of the client, once.
+        const toAccept = await issued(quoteAgency, ownerAccess, quoteBody());
+        assert.equal((await acceptQuote(quoteAgency, agentAccess, toAccept.id, { accepted: true })).status, 400, 'the action has no body');
+        assert.equal((await acceptQuote(quoteAgency, null, toAccept.id)).status, 401);
+        assert.equal((await acceptQuote(quoteAgency, agentAccess, 'not-a-uuid')).status, 400);
+        assert.equal((await quoteRow(toAccept.id)).status, 'issued', 'refusals change nothing');
+        const accepted = await acceptQuote(quoteAgency, agentAccess, toAccept.id);
+        assert.equal(accepted.status, 200, 'an agent records the acceptance');
+        assert.match(accepted.headers.get('cache-control'), /no-store/);
+        const acceptedQuote = await accepted.json();
+        assert.deepEqual([acceptedQuote.status, acceptedQuote.acceptedBy, acceptedQuote.total, acceptedQuote.rateCardVersion, acceptedQuote.reference], ['accepted', invitedUser, 2500, 1, toAccept.reference]);
+        assert.ok(Math.abs(Date.now() - Date.parse(acceptedQuote.acceptedAt)) < 60000);
+        await problemOf(await acceptQuote(quoteAgency, adminAccess, toAccept.id), 409, 'QUOTE_ALREADY_ACCEPTED', 'a quote is accepted once');
+        assert.deepEqual(await readQuote(quoteAgency, ownerAccess, toAccept.id).then(response => response.json()), acceptedQuote, 'the first acceptance stands');
+        assert.equal((await quoteRow(toAccept.id)).accepted_by, invitedUser);
+        assert.deepEqual((await quoteTrail(quoteAgency)).filter(entry => entry.resource_id === toAccept.id).map(entry => [entry.action, entry.user_id]), [['pricing.quote_issued', account.id], ['pricing.quote_accepted', invitedUser]], 'one trace for the acceptance');
+
+        // Two acceptances at once: one wins.
+        const contested = await issued(quoteAgency, ownerAccess, quoteBody());
+        const race = await Promise.all([acceptQuote(quoteAgency, agentAccess, contested.id), acceptQuote(quoteAgency, adminAccess, contested.id), acceptQuote(quoteAgency, ownerAccess, contested.id)]);
+        assert.deepEqual(race.map(response => response.status).sort(), [200, 409, 409], 'one of the simultaneous acceptances wins');
+        const winner = race.find(response => response.status === 200);
+        assert.equal((await quoteRow(contested.id)).accepted_by, (await winner.json()).acceptedBy);
+        assert.equal((await quoteTrail(quoteAgency)).filter(entry => entry.resource_id === contested.id && entry.action === 'pricing.quote_accepted').length, 1, 'and a single acceptance is audited');
+
+        // Validity: a week, derived from the clock; written nowhere.
+        const lapsing = await issued(quoteAgency, ownerAccess, quoteBody());
+        await agencyPool.query("UPDATE quotes SET issued_at = now() - interval '9 days', valid_until = now() - interval '2 days' WHERE id = $1", [lapsing.id]);
+        await problemOf(await acceptQuote(quoteAgency, agentAccess, lapsing.id), 409, 'QUOTE_EXPIRED', 'an expired quote cannot be accepted');
+        assert.equal((await readQuote(quoteAgency, agentAccess, lapsing.id).then(response => response.json())).status, 'expired');
+        assert.equal((await listQuotes(quoteAgency, agentAccess, '?limit=100').then(response => response.json())).items.find(item => item.id === lapsing.id).status, 'expired');
+        assert.equal((await quoteRow(lapsing.id)).status, 'issued', 'expiry is not written');
+        const lastHour = await issued(quoteAgency, ownerAccess, quoteBody());
+        await agencyPool.query("UPDATE quotes SET issued_at = now() - interval '6 days 23 hours', valid_until = now() + interval '1 hour' WHERE id = $1", [lastHour.id]);
+        assert.equal((await acceptQuote(quoteAgency, agentAccess, lastHour.id)).status, 200, 'a quote is accepted until its last hour');
+
+        // A retired zone and a suspended delivery refuse the acceptance and leave the quote issued.
+        const baliZone = await zoneOf(quoteAgency, { city: 'Bali' });
+        const toRetire = await issued(quoteAgency, ownerAccess, quoteBody({ zoneId: baliZone.id, manualPrice: { price: 2200, reason: 'zone excentrée' } }));
+        assert.equal((await retireZone(quoteAgency, baliZone.id, ownerAccess)).status, 200);
+        await problemOf(await acceptQuote(quoteAgency, agentAccess, toRetire.id), 409, 'ZONE_RETIRED', 'the zone of the quote was retired');
+        assert.deepEqual([(await quoteRow(toRetire.id)).status, (await readQuote(quoteAgency, agentAccess, toRetire.id).then(response => response.json())).zone], ['issued', { id: baliZone.id, city: 'Bali', district: null }]);
+        const toSuspend = await issued(quoteAgency, ownerAccess, quoteBody());
+        assert.equal((await suspend(quoteAgency, 'delivery', ownerAccess)).status, 200);
+        await problemOf(await acceptQuote(quoteAgency, agentAccess, toSuspend.id), 409, 'DELIVERY_NOT_ACTIVE', 'the delivery is suspended');
+        await problemOf(await issue(quoteAgency, agentAccess, quoteBody()), 409, 'DELIVERY_NOT_ACTIVE', 'and nothing new is quoted');
+        assert.equal((await readQuote(quoteAgency, agentAccess, toSuspend.id)).status, 200, 'the quote is still readable');
+        assert.equal((await enable(quoteAgency, 'delivery', ownerAccess)).status, 200);
+        assert.equal((await acceptQuote(quoteAgency, agentAccess, toSuspend.id)).status, 200, 'accepted once the delivery is back');
+
+        // Acceptance and retirement of the zone are serialized on the agency: acceptance waits for a lock held on the agency,
+        // and then sees the zone retired. Whoever is refused is answered without waiting.
+        const lockedZone = await zoneOf(quoteAgency, { city: 'Limbe' });
+        const lockedQuote = await issued(quoteAgency, ownerAccess, quoteBody({ zoneId: lockedZone.id, manualPrice: { price: 2600, reason: 'zone côtière' } }));
+        const holder = await agencyPool.connect();
+        try {
+          await holder.query('BEGIN');
+          await holder.query('SELECT id FROM agencies WHERE id = $1 FOR UPDATE', [quoteAgency]);
+          const quickly = (response) => Promise.race([response, delay(4000).then(() => { throw new Error('answered only after the lock was released: the lock is taken before the role check'); })]);
+          assert.equal((await quickly(acceptQuote(quoteAgency, outsiderAccess, lockedQuote.id))).status, 404, 'an outsider is answered without waiting for the lock');
+          assert.equal((await quickly(acceptQuote(quoteAgency, formerAccess, lockedQuote.id))).status, 404, 'a former member is answered without waiting for the lock');
+          assert.equal((await quickly(issue(quoteAgency, outsiderAccess, quoteBody()))).status, 404, 'an outsider issuing is answered without waiting for the lock');
+          const waiting = acceptQuote(quoteAgency, agentAccess, lockedQuote.id);
+          assert.equal(await Promise.race([waiting.then(() => 'answered'), delay(500).then(() => 'waiting')]), 'waiting', 'an allowed member waits for the lock');
+          await holder.query('UPDATE service_zones SET retired_at = now() WHERE agency_id = $1 AND id = $2', [quoteAgency, lockedZone.id]);
+          await holder.query('COMMIT');
+          await problemOf(await waiting, 409, 'ZONE_RETIRED', 'the acceptance that waited sees the zone retired');
+        } finally {
+          await holder.query('ROLLBACK').catch(() => undefined);
+          holder.release();
+        }
+        assert.equal((await quoteRow(lockedQuote.id)).status, 'issued');
+        for (let round = 0; round < 3; round += 1) {
+          const zone = await zoneOf(quoteAgency, { city: 'Course', district: `Quartier ${round}` });
+          const target = await issued(quoteAgency, ownerAccess, quoteBody({ zoneId: zone.id, manualPrice: { price: 2100, reason: 'zone de course' } }));
+          const [acceptance, retirement] = await Promise.all([acceptQuote(quoteAgency, agentAccess, target.id), retireZone(quoteAgency, zone.id, ownerAccess)]);
+          assert.equal(retirement.status, 200, 'the zone is retired whichever comes first');
+          if (acceptance.status === 200) assert.equal((await quoteRow(target.id)).status, 'accepted');
+          else {
+            await problemOf(acceptance, 409, 'ZONE_RETIRED', 'otherwise the acceptance sees the retired zone');
+            assert.equal((await quoteRow(target.id)).status, 'issued');
+          }
+        }
+
+        // The quote is a copy: a new version of the rate card and a corrected zone label never reach it.
+        const frozen = await readQuote(quoteAgency, ownerAccess, quote1.id).then(response => response.json());
+        const frozenAccepted = await readQuote(quoteAgency, ownerAccess, toAccept.id).then(response => response.json());
+        const version2 = await act('POST', `${quoteAgency}/rate-card/versions`, ownerAccess, rateCardBody(1200), { 'if-match': '"1"' });
+        assert.equal(version2.status, 201, 'version 2 of the rate card is published');
+        assert.equal((await patchZone(quoteAgency, akwaZone.id, ownerAccess, { city: 'Douala', district: 'Akwa Nord' })).status, 200, 'the zone label is corrected');
+        assert.deepEqual(await readQuote(quoteAgency, ownerAccess, quote1.id).then(response => response.json()), frozen, 'an issued quote does not change');
+        assert.deepEqual(await readQuote(quoteAgency, ownerAccess, toAccept.id).then(response => response.json()), frozenAccepted, 'an accepted quote does not change');
+        const afterwards = await issued(quoteAgency, agentAccess, quoteBody());
+        assert.deepEqual([afterwards.rateCardVersion, afterwards.total, afterwards.zone.district], [2, 2700, 'Akwa Nord'], 'a quote issued afterwards uses version 2 and the corrected label');
+        assert.deepEqual([frozen.rateCardVersion, frozen.total, frozen.zone.district], [1, 2500, 'Akwa']);
+
+        // The database guards what the application means: contradictory rows are refused, whatever writes them.
+        let counter = 0;
+        const rowDefaults = () => ({
+          id: randomUUID(), agency_id: quoteAgency, reference: `DEV-${year}-9${String(++counter).padStart(5, '0')}`, recipient_name: 'Jean Kamga', zone_id: akwaZone.id, zone_city: 'Douala',
+          parcels: JSON.stringify([{ weightGrams: 800, dimensions: null, taxableGrams: 800, price: 1000 }]), pricing_status: 'priced', calculated_total_xaf: 1000, total_xaf: 1000,
+          issued_at: new Date(), issued_by: adminUser, valid_until: new Date(Date.now() + 7 * 86400000), status: 'issued',
+        });
+        const tryInsert = async (overrides) => {
+          const row = { ...rowDefaults(), ...overrides };
+          const columns = Object.keys(row);
+          const writer = await agencyPool.connect();
+          try {
+            await writer.query('BEGIN');
+            await writer.query(`INSERT INTO quotes (${columns.join(', ')}) VALUES (${columns.map((_, index) => `$${index + 1}`).join(', ')})`, columns.map(column => row[column]));
+            return null;
+          } catch (error) { return error; } finally {
+            await writer.query('ROLLBACK').catch(() => undefined);
+            writer.release();
+          }
+        };
+        assert.equal(await tryInsert({}), null, 'a consistent row is accepted (and rolled back)');
+        assert.equal(await tryInsert({ agency_id: neighbour, zone_id: foreignZone.id, reference: heavy.reference }), null, 'the same reference in another agency is fine');
+        const refused = {
+          'a total that is not the price retained': [{ total_xaf: 999 }, 'quotes_total_is_price_retained'],
+          'no price at all': [{ pricing_status: 'no_tariff', calculated_total_xaf: null }, 'quotes_priced_by_calculation_or_by_hand'],
+          'a manual price without reason': [{ manual_price_xaf: 900, total_xaf: 900 }, 'quotes_manual_price_with_reason'],
+          'a reference used twice in the agency': [{ reference: quote1.reference }, 'quotes_agency_reference_unique'],
+          'a reference that is not one': [{ reference: 'DEV-26-1' }, 'quotes_reference_format'],
+          'a zone of another agency': [{ zone_id: foreignZone.id }, 'quotes_agency_zone_service_zones_fk'],
+          'an acceptance without author': [{ status: 'accepted', accepted_at: new Date(Date.now() + 1000) }, 'quotes_acceptance_complete'],
+          'an acceptance after the validity': [{ status: 'accepted', accepted_at: new Date(Date.now() + 10 * 86400000), accepted_by: adminUser }, 'quotes_accepted_within_validity'],
+          'a phone number that is not Cameroonian': [{ recipient_phone: '0612345678' }, 'quotes_recipient_phone_format'],
+          'no parcel at all': [{ parcels: JSON.stringify([]) }, 'quotes_parcels_array'],
+          'a status that is not known': [{ status: 'expired' }, 'quotes_status_values'],
+          'a validity that ends before the issue': [{ valid_until: new Date(Date.now() - 86400000) }, 'quotes_validity_after_issue'],
+        };
+        for (const [what, [overrides, constraint]] of Object.entries(refused)) {
+          const error = await tryInsert(overrides);
+          assert.ok(error, `the database refuses ${what}`);
+          assert.equal(error.constraint, constraint, `${what}: refused by ${constraint}`);
+        }
+        const notWhole = await tryInsert({ calculated_total_xaf: 1000.5, total_xaf: 1000.5 });
+        assert.equal(notWhole?.code, '22P02', 'the database refuses an amount that is not a whole number');
+
+        // Audit: one trace per quote issued and per acceptance, naming the quote and the author, nothing of the recipient or the price.
+        const finalTrail = await quoteTrail(quoteAgency);
+        const totals = await quoteRows(quoteAgency);
+        const quoteIds = (await agencyPool.query('SELECT id FROM quotes WHERE agency_id = $1', [quoteAgency])).rows.map(row => row.id);
+        assert.equal(finalTrail.filter(entry => entry.action === 'pricing.quote_issued').length, totals.total, 'one trace for each quote issued, none for refusals or replays');
+        assert.equal(finalTrail.filter(entry => entry.action === 'pricing.quote_accepted').length, totals.accepted, 'one trace for each acceptance, none for refusals');
+        assert.ok(finalTrail.every(entry => quoteIds.includes(entry.resource_id) && entry.details === null), 'every trace names a quote of the agency and holds no detail');
+        const everyQuoteTrace = JSON.stringify(finalTrail);
+        for (const secret of ['Jean', 'Kamga', 'Awa', 'Ngono', 'Paul', 'Mbarga', '+237', 'régulier', 'gros colis', 'zone proche', 'Douala', 'Akwa', 'XAF', akwaZone.id, deidoZone.id]) assert.ok(!everyQuoteTrace.includes(secret), `the audit never holds "${secret}"`);
+
+        // References: 1, 2, 3 ... without gap or repetition, whatever was refused, replayed or simultaneous.
+        const references = (await agencyPool.query('SELECT reference FROM quotes WHERE agency_id = $1 ORDER BY reference', [quoteAgency])).rows.map(row => row.reference);
+        assert.deepEqual(references, references.map((_, index) => `DEV-${year}-${String(index + 1).padStart(6, '0')}`), 'the references are consecutive');
+        assert.equal((await agencyPool.query('SELECT last_number FROM quote_sequences WHERE agency_id = $1 AND year = $2', [quoteAgency, year])).rows[0].last_number, references.length, 'the counter says how many quotes were issued');
+        activeOne = previousActive;
+      }
+
       // Audit: one row per effective action, names and types only.
       const trail = await configAudit(capsAgency);
       assert.deepEqual(trail.filter(entry => entry.action === 'agency.capability_enabled' || entry.action === 'agency.capability_suspended').slice(0, 3).map(entry => [entry.action, entry.user_id, entry.details]), [
@@ -1534,7 +1900,7 @@ const { Client } = require('pg');
     assert.ok(spec.paths['/api/v1/auth/logout']);
     assert.ok(spec.paths['/api/v1/me']);
     assert.deepEqual(Object.keys(spec.paths).sort(), [
-      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/quotes/preview', '/api/v1/agencies/{agencyId}/rate-card', '/api/v1/agencies/{agencyId}/rate-card/versions', '/api/v1/agencies/{agencyId}/rate-card/versions/{number}', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/submit', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
+      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/quotes', '/api/v1/agencies/{agencyId}/quotes/preview', '/api/v1/agencies/{agencyId}/quotes/{quoteId}', '/api/v1/agencies/{agencyId}/quotes/{quoteId}/accept', '/api/v1/agencies/{agencyId}/rate-card', '/api/v1/agencies/{agencyId}/rate-card/versions', '/api/v1/agencies/{agencyId}/rate-card/versions/{number}', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/submit', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
       '/api/v1/agency-invitations/accept',
       '/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/auth/refresh', '/api/v1/auth/register',
       '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies',

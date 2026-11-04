@@ -4,7 +4,12 @@ import { RateCard } from '../../domain/rate-card';
 import { RateCardContent, RawLine } from '../../domain/rate-card-content';
 import { RateCardVersion } from '../../domain/rate-card-version';
 import { RateCardRepository } from '../../domain/ports/rate-card.repository';
-import { RateCardAlreadyExists, StaleRateCardVersion } from '../../domain/exceptions/pricing.exceptions';
+import { QuoteRepository } from '../../domain/ports/quote.repository';
+import { Quote, QuoteSnapshot } from '../../domain/quote';
+import { QuoteId } from '../../domain/value-objects/quote-id';
+import { ListQuotesCriteria, ReadQuoteRepository } from '../../application/ports/read-quote.repository';
+import { QuoteRecord, QuoteSummaryRecord, recordOfQuote } from '../../application/read-models/quote.read-model';
+import { QuoteAlreadyAccepted, RateCardAlreadyExists, StaleRateCardVersion } from '../../domain/exceptions/pricing.exceptions';
 import { AgencyId } from '../../domain/value-objects/agency-id';
 import { RateCardId } from '../../domain/value-objects/rate-card-id';
 import { AgencyAccess, DeliveryAgencyState, DeliveryZone, MemberRole } from '../../application/ports/agency-access.port';
@@ -43,6 +48,8 @@ export class FakeAgencyAccess implements AgencyAccess {
   private readonly zones = new Map<string, readonly DeliveryZone[]>();
   /** How many times the agency was locked: an actor who is refused must not have taken the lock. */
   sharedLocks = 0;
+  /** Switch it off to simulate a suspended delivery capability. */
+  deliveryActive = true;
   /** Called after the lock is taken, to simulate a change of role made while the caller was waiting. */
   onLock: (() => void) | null = null;
 
@@ -63,8 +70,12 @@ export class FakeAgencyAccess implements AgencyAccess {
     return this.roles.get(`${agencyId}|${userId}`) ?? null;
   }
 
+  setZones(agencyId: string, zones: readonly DeliveryZone[]): void {
+    this.zones.set(agencyId, zones);
+  }
+
   async deliveryState(agencyId: string): Promise<DeliveryAgencyState> {
-    return { deliveryActive: true, zones: this.zones.get(agencyId) ?? [] };
+    return { deliveryActive: this.deliveryActive, zones: this.zones.get(agencyId) ?? [] };
   }
 
   async deliveryStateLockedShared(agencyId: string): Promise<DeliveryAgencyState> {
@@ -145,4 +156,62 @@ function contentOf(record: RateCardVersionRecord): RateCardContent {
     zoneId: line.zoneId,
     tiers: line.tiers.map(tier => ({ upTo: `${tier.upToGrams} g`, price: tier.price })),
   })));
+}
+
+/** The write and the read side of the quotes over the same rows, with the counter of the numbers of each agency and year. */
+export class InMemoryQuoteStore implements QuoteRepository, ReadQuoteRepository {
+  private readonly rows = new Map<string, QuoteSnapshot>();
+  private readonly counters = new Map<string, number>();
+  adds = 0;
+  saves = 0;
+  locks = 0;
+
+  async nextNumber(agencyId: AgencyId, year: number): Promise<number> {
+    const key = `${agencyId.value}|${year}`;
+    const next = (this.counters.get(key) ?? 0) + 1;
+    this.counters.set(key, next);
+    return next;
+  }
+
+  async add(quote: Quote): Promise<void> {
+    const snapshot = quote.snapshot();
+    this.adds += 1;
+    this.rows.set(snapshot.id.value, snapshot);
+  }
+
+  async findById(agencyId: AgencyId, quoteId: QuoteId): Promise<Quote | null> {
+    const snapshot = this.rows.get(quoteId.value);
+    return snapshot && snapshot.agencyId.value === agencyId.value ? Quote.reconstitute(snapshot) : null;
+  }
+
+  async lockById(agencyId: AgencyId, quoteId: QuoteId): Promise<Quote | null> {
+    this.locks += 1;
+    return this.findById(agencyId, quoteId);
+  }
+
+  async save(quote: Quote): Promise<void> {
+    const snapshot = quote.snapshot();
+    if (this.rows.get(snapshot.id.value)?.status !== 'issued') throw new QuoteAlreadyAccepted();
+    this.saves += 1;
+    this.rows.set(snapshot.id.value, snapshot);
+  }
+
+  count(agencyId?: string): number {
+    return [...this.rows.values()].filter(row => agencyId === undefined || row.agencyId.value === agencyId).length;
+  }
+
+  async findRecord(agencyId: string, quoteId: string): Promise<QuoteRecord | null> {
+    const snapshot = this.rows.get(quoteId);
+    return snapshot && snapshot.agencyId.value === agencyId ? recordOfQuote(snapshot) : null;
+  }
+
+  async listSummaries(criteria: ListQuotesCriteria): Promise<readonly QuoteSummaryRecord[]> {
+    return [...this.rows.values()]
+      .filter(row => row.agencyId.value === criteria.agencyId)
+      .map(recordOfQuote)
+      .sort((left, right) => right.issuedAt.localeCompare(left.issuedAt) || right.id.localeCompare(left.id))
+      .filter(row => criteria.after === null || row.issuedAt < criteria.after.issuedAt || (row.issuedAt === criteria.after.issuedAt && row.id < criteria.after.id))
+      .slice(0, criteria.limit)
+      .map(row => ({ id: row.id, reference: row.reference, recipientName: row.recipientName, zoneId: row.zoneId, zoneCity: row.zoneCity, zoneDistrict: row.zoneDistrict, total: row.total, issuedAt: row.issuedAt, validUntil: row.validUntil, status: row.status, acceptedAt: row.acceptedAt }));
+  }
 }

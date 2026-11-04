@@ -1,4 +1,4 @@
-import type { AgencyRole } from '@modules/agencies/domain/agency-role';
+import type { AgencyRole } from '@modules/agencies/application/queries/agency-access/agency-access.contract';
 
 /** The roles of a member of an agency, as `agencies` defines them. */
 export type MemberRole = AgencyRole;

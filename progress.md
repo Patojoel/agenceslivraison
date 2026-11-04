@@ -21,7 +21,7 @@ Tableau de bord vivant du projet. Le détail de chaque tâche (règles, endpoint
 | Lot backend courant | B3 — tarifs, zones, marketplace publique : S2 validé (2026-11-04, 5 tranches) ; tranche 1 en cours |
 | Branche | `refactor/architecture-normalisee` |
 | Mode de session | light (session du 2026-11-03) |
-| Tâches en cours | `[~]` B3 tranche 3 — devis (B3.7, B3.8, B3.15) (`back-builder`) |
+| Tâches en cours | `[~]` B3 tranche 4 — fiche publique et projection de l'annuaire (B3.9) (`back-builder`) |
 
 ### Refactor architecture + TypeORM — commité (2026-11-03)
 Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranchée en faveur de TypeORM et de l'architecture normalisée. `CLAUDE.md`, les agents (`back-builder`, `archi-reviewer`, `query-perf`), `phases.md` et `backend/docs/` sont alignés. Décision et conventions : [docs/architecture/](docs/architecture/).
@@ -35,7 +35,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | B0 | Socle technique | terminé (sauvegarde à valider en cible) | 11/12 |
 | B1 | Identité, sessions, memberships | terminé, re-vérifié après refactor (rate limit partagé et constats de revue B1.13–B1.14 à traiter) | 11/14 |
 | B2 | Onboarding agence | **terminé** (S1–S10) ; durcissements B2.13 et B2.15 livrés en tranche 1 de B3 | 15/15 |
-| B3 | Tarifs, zones, marketplace publique | en cours (S1, S2 faits ; tranches 1 et 2 faites) | 7/15 |
+| B3 | Tarifs, zones, marketplace publique | en cours (S1, S2 faits ; tranches 1 à 3 faites) | 10/15 |
 | B4 | Clients, commerçants, demandes | à faire | 0/14 |
 | B5 | Commandes, colis, suivi | à faire | 0/17 |
 | B6 | Livreurs, missions | à faire | 0/18 |
@@ -111,22 +111,22 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [x] B2.15 *(contre-revue sécurité, durcissement, tranche 1 de B3)* droits en `Record<AgencyRole, boolean>` exhaustif (`managesAgencyIdentity`, `submitsAgency`, `canInvite`, `canManage`), test sur `AGENCY_ROLES` et rôle inconnu
 
 ### B3 — Tarifs, zones, marketplace publique (CRITIQUE)
-Étapes : [x] S1 use cases (12 UC, 138 scénarios, 128 tests prévus ; `docs/use-cases/05-tarifs-zones/`, `docs/use-cases/03-marketplace-publique/` ; UC-05-01 et UC-05-03 complètent UC-02-03, D-15) · [x] S2 plan validé (2026-11-04, 5 tranches : 1) B2.13 + B2.15 + B3.2 ; 2) B3.4 + B3.5 + B3.14 + B3.6 + compléments B3.1, B3.3 ; 3) B3.7 + B3.8 + B3.15 ; 4) B3.9 ; 5) B3.10 à B3.13) · [~] S3–S8 (tranches 1 et 2 faites) · [ ] S9 (`security-reviewer` en fin de lot, tranche 1 comprise) · [ ] S10
+Étapes : [x] S1 use cases (12 UC, 138 scénarios, 128 tests prévus ; `docs/use-cases/05-tarifs-zones/`, `docs/use-cases/03-marketplace-publique/` ; UC-05-01 et UC-05-03 complètent UC-02-03, D-15) · [x] S2 plan validé (2026-11-04, 5 tranches : 1) B2.13 + B2.15 + B3.2 ; 2) B3.4 + B3.5 + B3.14 + B3.6 + compléments B3.1, B3.3 ; 3) B3.7 + B3.8 + B3.15 ; 4) B3.9 ; 5) B3.10 à B3.13) · [~] S3–S8 (tranches 1 à 3 faites) · [ ] S9 (`security-reviewer` en fin de lot, tranche 1 comprise) · [ ] S10
 - [x] B3.1 Créer zone — déjà livrée par B2.3 (D-15) ; complément B3 : zone sans ligne → `no_tariff` en simulation, sans erreur (E2E)
 - [x] B3.2 Modifier zone — `PATCH /agencies/{id}/zones/{zoneId}` (module `agencies`, D-25 : même identifiant, dernière correction gagnante), événement `ServiceZoneRenamed` audité (`resource_id`, noms de champs), 409 `ZONE_ALREADY_SERVED` / `ZONE_RETIRED_DUPLICATE` / `ZONE_RETIRED`, concurrence testée en E2E, aucune migration
 - [x] B3.3 Désactiver zone — retrait livré par B2.3 ; complément B3 : zone retirée non simulable ni versionnable (409 `ZONE_RETIRED`), lignes conservées et de nouveau valables à la réactivation (E2E)
 - [x] B3.4 Créer grille tarifaire — `POST /agencies/{id}/rate-card` (module `pricing`, une grille par agence, `ON CONFLICT` : un 201 et des 409 en concurrence)
 - [x] B3.5 Versionner grille — `POST /agencies/{id}/rate-card/versions` (`If-Match`, 428 / 409 `STALE_RATE_CARD_VERSION`, versions immuables, barème identique → 200 sans écriture)
 - [x] B3.6 Simuler prix — `POST /agencies/{id}/quotes/preview` (entiers, poids taxable au gramme supérieur, volumétrique, `out_of_scale`, `no_tariff`)
-- [ ] B3.7 Émettre devis
-- [ ] B3.8 Accepter devis
+- [x] B3.7 Émettre devis — `POST /agencies/{id}/quotes` (copie figée du calcul et de la version, prix manuel motivé, `Idempotency-Key`, référence `DEV-AAAA-NNNNNN` consécutive par agence et par année, tout membre actif — D-22)
+- [x] B3.8 Accepter devis — `POST /agencies/{id}/quotes/{quoteId}/accept` (acceptation unique en concurrence, « expiré » dérivé de l'horloge, zone retirée et livraison non active refusées sous `FOR SHARE` de l'agence, aucune commande)
 - [ ] B3.9 Publier fiche publique (échapper la description à l'affichage, le HTML y est conservé comme texte depuis B2.6 ; refuser `p{Cf}` (bidi, largeur nulle) dans les noms publiables ; ne pas publier les agences au nom provisoire de migration ; publier les agences soumises avec la mention « non vérifiée » (D-05) ; propriétaire seul ; livrer B2.13 avant ou avec B3.9)
 - [ ] B3.10 Rechercher (`GET /public/agencies`)
 - [ ] B3.11 Filtrer zone / capacité
 - [ ] B3.12 Consulter fiche (`/public/agencies/{slug}`)
 - [ ] B3.13 Index, EXPLAIN, rate limit public
 - [x] B3.14 *(ajoutée le 2026-11-04, anomalie A-35 des use cases)* Lire la grille et l'historique — `GET /agencies/{id}/rate-card`, `…/versions` (curseur, résumés), `…/versions/{number}`
-- [ ] B3.15 *(ajoutée le 2026-11-04, anomalie A-35 des use cases)* Lister et consulter les devis de l'agence (tout membre actif, curseur)
+- [x] B3.15 *(ajoutée le 2026-11-04, anomalie A-35 des use cases)* Lister et consulter les devis — `GET /agencies/{id}/quotes` (curseur opaque, résumés sans téléphone, index vérifié par EXPLAIN), `GET …/quotes/{quoteId}`
 
 ### B4 — Clients, commerçants, demandes (CRITIQUE)
 Étapes : [ ] S1 · [ ] S2 · [ ] S3 · [ ] S4 · [ ] S5 · [ ] S6 · [ ] S7 · [ ] S8 · [ ] S9 · [ ] S10
@@ -387,6 +387,7 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B3 tranche 3 — B3.7 + B3.8 + B3.15 (devis) et reprises de la tranche 2 | Vert ; 4 routes de devis ; migration `1793809498779-quotes` (`quotes` avec 18 CHECK et clé étrangère composite vers `service_zones`, `quote_sequences`) ; rouges constatés en unitaire et en E2E écrit avant le code HTTP (`404 !== 409`) ; concurrence testée (acceptations, émissions, clé d'idempotence, acceptation contre retrait de zone) ; EXPLAIN de la liste ; reprise a faite (`agency-access.contract.ts`, API publique d'`agencies`), reprise b gardée (`version:<n>` dans `details.fields`, historique d'audit non réécrit) ; à noter pour B4 : les devis portent nom et téléphone du destinataire (conservation et suppression des données personnelles à décider) | `npm run lint` OK · `npm run typecheck` OK · `npm test` 367/367 (relancé par la session principale) · `npm run build` OK (relancé) · `migration:check` « No changes » · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B3 tranche 2 — B3.4 + B3.5 + B3.14 + B3.6 (+ compléments B3.1, B3.3) | Vert ; nouveau module `pricing` (6 routes), service de lecture `AgencyAccessReader` exposé par `agencies` (rôle, zones actives, livraison, `FOR SHARE` après contrôle du rôle) ; migration `1793808144018-rate-cards` (3 tables, clés étrangères composites dont `(agency_id, zone_id)` → `service_zones`, 5 CHECK) ; rouges constatés en unitaire et en E2E (module retiré → `404 !== 200`) ; écart TDD : `pricing-rights.ts` écrit avant son test ; concurrence testée (création, versionnement, publication contre retrait de zone) ; à reprendre en tranche 3 : import du domaine d'`agencies` par `pricing` (API publique à exposer), numéro de version logé dans `details.fields` de l'audit ; D-27 ouverte | `npm run lint` OK · `npm run typecheck` OK · `npm test` 320/320 (relancé par la session principale) · `npm run build` OK (relancé) · `migration:check` « No changes » · `npm audit --omit=dev` 0 · E2E Docker exit 0 · `compose down` |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B3 tranche 1 — B2.15 + B2.13 + B3.2 | Vert ; rouges constatés en unitaire et en E2E (`404 !== 200` sur le code d'origine) ; aucune migration ; verrou réel testé (étranger, ancien membre, agent répondus sans attendre) ; service de lecture exposé reporté en tranche 2 avec son premier consommateur ; D-26 ouverte | `npm run lint` OK · `npm run typecheck` OK · `npm test` 254/254 (relancé par la session principale) · `npm run build` OK (relancé) · E2E Docker exit 0 · `npm audit --omit=dev` 0 · `migration:check` non lancé (aucun changement de schéma) |
 | 2026-11-04 | user + session principale | B3.S2 — plan du lot validé | 5 tranches ; trois défauts retenus (découpage, projection publique in-process dans la transaction, routes sous `/agencies/{id}` et curseur opaque) ; tranche 1 lancée | aucune |

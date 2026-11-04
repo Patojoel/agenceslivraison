@@ -4,10 +4,18 @@ import { DomainEventSubscriber } from '@shared/application/ports/domain-event-pu
 import { DomainEvent } from '@shared/domain/domain-event';
 import { isPricingEvent, PricingEvent } from '../../domain/events/pricing-events';
 
-/** The trace names the rate card and the version number: never a price, a weight or a zone. */
+/**
+ * The trace names the resource (rate card or quote) and the author: never a price, a weight, a zone, nor who a quote is for.
+ * The rate card traces also carry the version number, as `version:<n>` in `fields`: rows written so far have that form,
+ * and the audit history is never rewritten, so the form is kept rather than split in two.
+ */
 function toAuditEntry(event: PricingEvent): AuditEntry {
-  const action = event.type === 'RateCardCreated' ? 'pricing.rate_card_created' : 'pricing.rate_card_versioned';
-  return { userId: event.actorId, action, agencyId: event.agencyId, resourceId: event.rateCardId, details: { fields: [`version:${event.version}`] } };
+  switch (event.type) {
+    case 'RateCardCreated': return { userId: event.actorId, action: 'pricing.rate_card_created', agencyId: event.agencyId, resourceId: event.rateCardId, details: { fields: [`version:${event.version}`] } };
+    case 'RateCardVersioned': return { userId: event.actorId, action: 'pricing.rate_card_versioned', agencyId: event.agencyId, resourceId: event.rateCardId, details: { fields: [`version:${event.version}`] } };
+    case 'QuoteIssued': return { userId: event.actorId, action: 'pricing.quote_issued', agencyId: event.agencyId, resourceId: event.quoteId };
+    case 'QuoteAccepted': return { userId: event.actorId, action: 'pricing.quote_accepted', agencyId: event.agencyId, resourceId: event.quoteId };
+  }
 }
 
 @Injectable()

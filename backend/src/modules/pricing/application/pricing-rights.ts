@@ -6,6 +6,7 @@ import type { MemberRole } from './ports/agency-access.port';
  */
 const WRITES_RATE_CARD: Readonly<Record<MemberRole, boolean>> = { owner: true, admin: true, agent: false };
 const READS_PRICING: Readonly<Record<MemberRole, boolean>> = { owner: true, admin: true, agent: true };
+const ISSUES_QUOTES: Readonly<Record<MemberRole, boolean>> = { owner: true, admin: true, agent: true };
 
 function ownEntry(table: Readonly<Record<MemberRole, boolean>>, role: MemberRole): boolean {
   return Object.hasOwn(table, role) && table[role] === true;
@@ -16,7 +17,12 @@ export function mayWriteRateCard(role: MemberRole): boolean {
   return ownEntry(WRITES_RATE_CARD, role);
 }
 
-/** Every active member reads the rate card and its history, and simulates a price. */
+/** Every active member reads the rate card and its history, simulates a price, and reads the quotes. */
 export function mayReadPricing(role: MemberRole): boolean {
   return ownEntry(READS_PRICING, role);
+}
+
+/** Every active member, agents included, issues a quote at the counter and records its acceptance on behalf of the client (D-22). */
+export function mayIssueQuotes(role: MemberRole): boolean {
+  return ownEntry(ISSUES_QUOTES, role);
 }

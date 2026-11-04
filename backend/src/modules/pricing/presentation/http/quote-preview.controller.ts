@@ -7,7 +7,7 @@ import { AccessTokenGuard } from '@modules/identity/presentation/http/guards/acc
 import { uuidSchema, ZodValidationPipe } from '@shared/presentation/pipes/zod-validation.pipe';
 import { PreviewQuoteHandler } from '../../application/queries/preview-quote/preview-quote.handler';
 import { PreviewQuoteResponse } from '../../application/queries/preview-quote/preview-quote.response';
-import { previewQuoteRequest } from './dto/preview-quote.request';
+import { previewQuoteRequest, rawParcelsOf } from './dto/preview-quote.request';
 
 @ApiTags('quotes')
 @ApiBearerAuth()
@@ -31,7 +31,7 @@ export class QuotePreviewController {
       agencyId,
       userId: user.id,
       zoneId: body.zoneId,
-      parcels: body.parcels.map(parcel => ({ weight: parcel.weight, dimensions: parcel.dimensions ? { length: parcel.dimensions.length, width: parcel.dimensions.width, height: parcel.dimensions.height } : null })),
+      parcels: rawParcelsOf(body.parcels),
     });
   }
 }
