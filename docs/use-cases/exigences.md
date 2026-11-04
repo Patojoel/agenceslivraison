@@ -5,6 +5,7 @@ Spécification exécutable issue du cahier des charges (`docs/cahier-des-charges
 | Lot | Phase | Fiche | Date | Rédacteur |
 |---|---|---|---|---|
 | 2 — Onboarding agence | B2 (S1) | `docs/modules/02-agences-onboarding.md` | 2026-11-03 | `use-case-writer` |
+| 3 — Tarifs, zones, marketplace publique | B3 (S1) — voir [§B3](#b3--tarifs-zones-et-marketplace-publique) | `docs/modules/05-tarifs-zones.md`, `docs/modules/03-marketplace.md` (UC-03-01 à 04) | 2026-11-04 | `use-case-writer` |
 
 Sources lues intégralement : `README.md`, `CODEX.md`, `docs/architecture/01` à `06`, `docs/delivery/roadmap.md`, `docs/delivery/acceptance.md`, `docs/modules/02-agences-onboarding.md` ; pour le contexte : fiches 01, 03, 05, 15 ; `backend/docs/domains.md`, `events.md`, `routes/identite-acces.md`, `routes/groupes-prevus.md`.
 
@@ -138,3 +139,161 @@ Abréviations de source : **F02** = `docs/modules/02-agences-onboarding.md` ; **
 | EX-02-013 session révoquée | X | X | X | X | X | X | X | X | X |
 
 Le détail règle → scénario → test figure dans la section 0 de chaque use case.
+
+---
+
+## B3 — Tarifs, zones et marketplace publique
+
+Sources lues : `README.md`, `CODEX.md`, `docs/architecture/01` à `03`, `05`, `06`, `docs/delivery/roadmap.md`, `docs/delivery/acceptance.md`, `docs/modules/05-tarifs-zones.md`, `docs/modules/03-marketplace.md` (partie publique) ; pour l'existant : `backend/docs/domains.md`, `events.md`, `routes/agences-onboarding.md`, `routes/groupes-prevus.md`, migration `1793777474207-agency-draft-and-idempotency` (nom provisoire) ; décisions et notes de `progress.md` (D-05, D-13, D-15, D-17, D-19, D-20, note B3.9) et notes de la revue sécurité B2 transmises avec la consigne.
+
+Abréviations supplémentaires : **F05** = `docs/modules/05-tarifs-zones.md` ; **F03** = `docs/modules/03-marketplace.md` ; **PG** = `progress.md` ; **RAO** = `backend/docs/routes/agences-onboarding.md` ; **RSB2** = revue sécurité B2 (note de B3.9 dans PG et consigne du lot).
+
+### B3.1 Inventaire
+
+#### Cas d'usage des fiches
+
+| ID | Source | Énoncé reformulé (vérifiable) | Type | Priorité | Use case(s) |
+|---|---|---|---|---|---|
+| UC-05-01 | F05 §1 ; PH B3.1 ; D-15 | Toute zone desservie de l'agence (UC-02-03) est une zone tarifable, sans second objet ; elle est « sans tarif » tant qu'aucune version de grille ne la couvre. | Fonctionnel | Must | UC-05-01 (+ UC-02-03 livré) |
+| UC-05-02 | F05 §2 ; PH B3.2 | Un responsable corrige le libellé d'une zone active en gardant son identifiant ; les devis émis gardent l'ancien libellé **[HYPOTHÈSE]**. | Fonctionnel | Should | UC-05-02 |
+| UC-05-03 | F05 §3 ; PH B3.3 ; D-15 | Une zone retirée (UC-02-03) n'est plus simulée, ni chiffrée en devis, ni acceptée, ni affichée publiquement ; ses lignes de grille sont conservées. | Fonctionnel | Must | UC-05-03 (+ UC-02-03 livré) |
+| UC-05-04 | F05 §4 ; PH B3.4 | Un responsable crée la grille de livraison de l'agence (version 1) : tranches de poids par zone, unités explicites, prix XAF entiers **[HYPOTHÈSE] D-05**. | Fonctionnel | Must | UC-05-04 |
+| UC-05-05 | F05 §5 ; PH B3.5 | Un responsable publie une nouvelle version complète, fondée sur la version en vigueur ; l'ancienne reste consultable et inchangée ; aucun devis n'est recalculé. | Fonctionnel | Must | UC-05-05 |
+| UC-05-06 | F05 §6 ; PH B3.6 | Tout membre obtient un prix indicatif (par colis et total) avec la version en vigueur, sans rien enregistrer. | Fonctionnel | Must | UC-05-06 |
+| UC-05-07 | F05 §7 ; PH B3.7 | Tout membre émet un devis daté, référencé, figé à l'émission, valable 7 jours **[HYPOTHÈSE]**. | Fonctionnel | Must | UC-05-07 |
+| UC-05-08 | F05 §8 ; PH B3.8 | Tout membre enregistre, une seule fois et avant expiration, l'acceptation d'un devis, qui fige définitivement son prix ; aucune commande n'est créée. | Fonctionnel | Must | UC-05-08 |
+| UC-03-01 | F03 §1 ; PH B3.9 ; D-05 | Le propriétaire publie (ou retire) la fiche publique d'une agence soumise ; elle porte la mention « non vérifiée » et ne contient que des champs autorisés. | Fonctionnel | Must | UC-03-01 |
+| UC-03-02 | F03 §2 ; PH B3.10 | Un visiteur sans compte parcourt et recherche par nom les fiches visibles, par pages à curseur. | Fonctionnel | Must | UC-03-02 |
+| UC-03-03 | F03 §3 ; PH B3.11 | Un visiteur filtre l'annuaire par ville, quartier et capacité (livraison, stockage, hybride). | Fonctionnel | Must | UC-03-03 |
+| UC-03-04 | F03 §4 ; PH B3.12 | Un visiteur consulte la fiche visible d'un slug ; toute autre situation donne le même « introuvable ». | Fonctionnel | Must | UC-03-04 |
+
+#### Règles des fiches
+
+| ID | Source | Énoncé source | Reformulation vérifiable | Priorité | Use case(s) |
+|---|---|---|---|---|---|
+| RM-05-01 | F05 §Règles | « Prix historisé à l'acceptation. » | Un devis fige à l'émission sa version, sa zone et son prix ; l'acceptation les rend définitifs ; aucune version, correction ou retrait de zone ultérieurs ne les modifie (A-22). | Must | UC-05-02, 03, 05, 07, 08 |
+| RM-05-02 | F05 §Règles | « zone inactive interdit nouvelles commandes. » | Zone retirée : ni simulation, ni devis, ni acceptation d'un devis émis **[HYPOTHÈSE]**, ni affichage public ; blocage des commandes vérifié en B5 (A-25). | Must | UC-05-03, 07, 08 ; UC-03-03 |
+| RM-05-03 | F05 §Règles | « unité poids/volume explicite. » | Tout poids saisi porte `kg` ou `g`, toute dimension `cm` ; une valeur sans unité ou d'unité inconnue est refusée (A-26). | Must | UC-05-04, 05, 06 |
+| RM-05-04 | F05 §Règles | « arrondi monétaire cohérent. » | Montants en francs CFA entiers ; poids taxable arrondi au gramme supérieur ; total = somme des prix des colis ; simulation et devis donnent le même total pour les mêmes entrées et la même version **[HYPOTHÈSE] D-05** (A-27). | Must | UC-05-04, 06, 07 |
+| RM-05-05 | F05 §Règles | « tarifs spécifiques à agence. » | Une grille appartient à une agence et ne référence que ses zones ; grille, zone ou devis d'une autre agence → introuvable. | Must | UC-05-01, 02, 04 à 07 |
+| RM-03-01 | F03 §Règles ; ADR-10 | « Fiche publique n'expose pas clients internes. » | La fiche publique et les résultats de recherche ne contiennent que les champs d'une liste fermée ; aucun client, membre, contact, identifiant légal, adresse, motif ni identifiant interne (A-29). | Must | UC-03-01 à 04 |
+| RM-03-05 | F03 §Règles | « tarifs affichés non garantis sans devis. » | Tout prix montré hors devis (simulation, tarifs indicatifs publics) porte la mention « non garanti sans devis ». | Must | UC-05-06 ; UC-03-01, 04 |
+| RM-03-02 à 04 | F03 §Règles | demandes | **Hors B3** (B4). | — | — |
+
+#### Exigences transverses du lot
+
+| ID | Source | Énoncé reformulé (vérifiable) | Type | Priorité | Use case(s) |
+|---|---|---|---|---|---|
+| EX-05-001 | ARC3 §Sécurité ; CL | Non-membre actif (ancien membre, autre agence) → « introuvable » (404) sur agence, zone, grille, devis ; aucune donnée renvoyée. | Sécurité | Must | UC-05-01 à 08 |
+| EX-05-002 | D-13 ; RAO | Agent sur une écriture de configuration (zone, grille) → 403. | Sécurité | Must | UC-05-02, 04, 05 |
+| EX-05-003 | CDX ; CL | Agence désignée par le chemin ; identifiants de zone, de grille, de devis cherchés dans cette agence seulement ; aucun identifiant d'agence, statut, version ou montant calculé accepté dans le contenu. | Sécurité | Must | UC-05-01 à 08 |
+| EX-05-004 | F05 §1 à 8 (« effet concurrent ») ; ARC3 | Actions concurrentes : un seul effet (grille unique, version n+1 unique, acceptation unique, références distinctes, retrait de zone contre émission). | Robustesse | Must | UC-05-02 à 05, 07, 08 |
+| EX-05-005 | F05 (« audit ») ; ARC3 §Modèle | Chaque écriture est auditée dans la transaction, avec identifiant de ressource et noms de champs, jamais prix, zones saisies ni données du destinataire. | Traçabilité | Must | UC-05-02, 04, 05, 07, 08 |
+| EX-05-006 | ARC5 | Problem Details avec `code` ; validation stricte ; listes `{ items, nextCursor, hasMore }`. | Contrat | Must | tous |
+| EX-05-007 | RM-01-05 | Session révoquée ou jeton expiré → 401. | Sécurité | Must | tous |
+| EX-05-008 | ARC5 ; CL | Aucune suppression physique de zone, grille, version, devis. | Règle | Must | UC-05-03, 05, 07 |
+| EX-05-009 | CL (historisation) ; RM-05-01 | Versions de grille et devis acceptés immuables. | Règle | Must | UC-05-04, 05, 08 |
+| EX-05-010 | ARC5 (idempotence des créations à risque) ; D-14 | Émission de devis protégée du double envoi par une clé facultative **[HYPOTHÈSE]**. | Robustesse | Should | UC-05-07 |
+| EX-05-011 | F05 §DoD ; ARC1 ADR-05/06 ; CL | Aucun paiement, acompte, notification ni envoi au client. | Contrainte | Must | UC-05-07, 08 |
+| EX-05-012 | ARC1 §Points à valider ; PG D-05 | Barèmes, dimensions, taxes, devise, arrondi : **À VALIDER** ; propositions par défaut marquées **[HYPOTHÈSE]**, jamais codées comme vérité sans décision. | À VALIDER | Must | UC-05-04, 06 |
+| EX-05-013 | CL (inter-modules) | `pricing` lit zones et capacités par ce qu'`agencies` expose, jamais par ses tables. | Conception | Must | UC-05-01, 03, 04, 07, 08 |
+| EX-03-001 | PH B3.10, B3.13 ; RSB2 | Routes publiques sans authentification, débit limité (429). | Sécurité | Must | UC-03-02, 03, 04 |
+| EX-03-002 | ADR-10 ; RSB2 | Projection publique en liste fermée, vérifiée par un test anti-fuite (ensemble des clés). | Sécurité | Must | UC-03-01, 02, 04 |
+| EX-03-003 | consigne B3 ; ARC3 | Fiche non publiée, retirée, masquée, d'une agence non soumise, ou slug inconnu : même « introuvable » ; jamais dans une liste ni un filtre. | Sécurité | Must | UC-03-01 à 04 |
+| EX-03-004 | ARC5 ; consigne B3 | Pagination par curseur, limite bornée, paramètres et filtres en liste fermée. | Contrat | Must | UC-03-02, 03 |
+| EX-03-005 | RSB2 ; RAO §Profil | Description restituée comme texte brut ; affichage échappé. | Sécurité | Must | UC-03-01, 04 |
+| EX-03-006 | RSB2 | Caractères de format Unicode (`\p{Cf}`) et de contrôle refusés dans les noms publiables et les textes de recherche. | Sécurité | Must | UC-03-01, 02, 03 |
+| EX-03-007 | RSB2 | Agences au nom provisoire de migration jamais publiées. | Sécurité | Must | UC-03-01, 02, 04 |
+| EX-03-008 | PG D-05 (2026-11-04) | Publiable si soumise et publiée par le propriétaire ; mention « non vérifiée » jusqu'à l'approbation (B10). | Règle | Must | UC-03-01, 02, 04 |
+| EX-03-009 | ARC3 §Indices ; PH B3.13 | Requêtes publiques indexées, vérifiées par EXPLAIN (agent `query-perf`). | Performance | Must | UC-03-02, 03 |
+| EX-03-010 | ARC6 | La projection reflète profil, zones, capacités, sites et grille sans republication (in-process). | Intégration | Must | UC-03-01, 04 |
+| EX-03-011 | D-05 ; ARC3 | Publication : propriétaire seul (403 admin et agent), 404 hors membres actifs ; agence du chemin. | Sécurité | Must | UC-03-01 |
+| EX-03-012 | ADR-10 **[HYPOTHÈSE]** | Aucun identifiant interne (agence, zone, membre) dans les réponses publiques ; seul le slug. | Sécurité | Should | UC-03-02, 04 |
+| EX-03-013 | F03 (« audit ») | Publication et retrait audités. | Traçabilité | Must | UC-03-01 |
+| EX-03-014 | F03 §1 (« effet concurrent ») | Publications concurrentes : un seul effet ; slugs homonymes distincts. | Robustesse | Must | UC-03-01 |
+
+### B3.2 Couverture
+
+| Catégorie | Couvertes | Total | Non couvertes et raison |
+|---|---|---|---|
+| Cas d'usage des fiches (UC-05-01 à 08, UC-03-01 à 04) | 12 | 12 | UC-05-01 et UC-05-03 : cœur déjà livré par UC-02-03 (D-15), seul le complément B3 est spécifié. |
+| Règles du lot (RM-05-01 à 05, RM-03-01, RM-03-05) | 7 | 7 | RM-05-02 « nouvelles commandes » vérifiable en B5 ; RM-03-02 à 04 hors B3 (B4). |
+| Exigences transverses (EX-05-001 à 013, EX-03-001 à 014) | 27 | 27 | — |
+
+### B3.3 Anomalies du cahier des charges
+
+| # | Type | Constat | Source | Traitement proposé |
+|---|---|---|---|---|
+| A-18 | Doublon (résolu) | UC-05-01 « créer zone » et UC-05-03 « désactiver » recoupent UC-02-03, déjà livré. | F05 §1, 3 ; D-15 | Renvoi à UC-02-03 ; seuls les effets B3 sont spécifiés. Ferme aussi A-03 de B2. |
+| A-19 | Ambiguïté | « modifier zone » sans contenu ; B2 ne prévoit aucune modification ; changer le secteur d'une zone tarifée brouillerait tarifs et devis. | F05 §2 | **[HYPOTHÈSE]** correction de libellé seulement, même identifiant (Q-27). |
+| A-20 | Contradiction | La note de B3.9 dans `progress.md` dit « ne publier que les agences approuvées — D-05 » ; la décision D-05 du 2026-11-04 dit « soumise + mention non vérifiée ». | PG §B3 ; PG Décisions prises | Suivre la décision ; corriger la note (proposé à la session principale). |
+| A-21 | Ambiguïté | `POST /quotes/preview` : public ou interne ? | F05 §API ; PH B3.6 | **[HYPOTHÈSE]** interne (membres) ; public : tarifs indicatifs seulement (Q-28). |
+| A-22 | Ambiguïté | RM-05-01 « prix historisé à l'acceptation » ne dit pas quel prix vaut entre émission et acceptation si la grille change. | F05 §Règles | **[HYPOTHÈSE]** le devis fige à l'émission et engage pendant sa validité ; l'acceptation le rend définitif. |
+| A-23 | Trou | Destinataire d'un devis non défini ; les clients d'agence n'existent qu'en B4. | F05 §7 ; F04 | **[HYPOTHÈSE]** nom + téléphone facultatif, privés (Q-29). |
+| A-24 | Trou | Acteur de l'acceptation non défini ; le client n'a pas de canal en B3. | F05 §8 | **[HYPOTHÈSE]** membre au nom du client (Q-32) ; client lui-même en B4. |
+| A-25 | Dépendance | RM-05-02 parle de commandes (B5). | F05 §Règles ; RDM | Étendue en B3 à la simulation, au devis et à la fiche ; commandes vérifiées en B5. |
+| A-26 | Non testable | RM-05-03 « unité explicite » : saisie, stockage ou affichage ? | F05 §Règles | Reformulée : unité obligatoire à la saisie, stockage normalisé en grammes. |
+| A-27 | Non testable | RM-05-04 « arrondi cohérent » sans règle. | F05 §Règles ; D-05 | Reformulée **[HYPOTHÈSE]** (Q-23). |
+| A-28 | Trou | `{slug}` cité sans règle de calcul, d'unicité ni de stabilité ; aucun retrait de fiche prévu. | F03 §API | **[HYPOTHÈSE]** slug calculé, unique, stable (Q-38) ; retrait par le propriétaire. |
+| A-29 | Trou | RM-03-01 ne vise que les clients internes ; rien sur contacts, RCCM, NIU, adresses, membres. | F03 ; ADR-10 ; RSB2 | Liste fermée explicite (Q-36), test anti-fuite. |
+| A-30 | Catalogue incomplet | ARC6 ne cite qu'`AgencyCapabilityEnabled` pour la projection publique ; elle dépend aussi du profil, des zones, des sites, de la soumission, de la suspension et de la grille. | ARC6 ; `events.md` | Lister les événements consommés en S2 (in-process). |
+| A-31 | Trou | Ordre des résultats de recherche non spécifié (enjeu d'équité entre agences). | F03 §2 | **[HYPOTHÈSE]** alphabétique (Q-42). |
+| A-32 | Ambiguïté | « filtrer par zone » pour une agence de stockage sans zone. | F03 §3 | **[HYPOTHÈSE]** la ville des sites actifs compte (Q-43). |
+| A-33 | Trou | Les noms provisoires de migration ne portent aucun indicateur. | migration `1793777474207` ; RSB2 | **[HYPOTHÈSE]** détection par égalité exacte « Agence » + 8 premiers caractères de l'identifiant (Q-41). |
+| A-34 | Trou | Aucune tarification du stockage, alors que le stockage est une capacité confirmée (ADR-04). | F05 ; ARC1 | Hors B3 **[HYPOTHÈSE]** (Q-25). |
+| A-35 | Trou | Aucune route de lecture des grilles, versions et devis, nécessaires à F1.5. | F05 §API ; PH F1.5 | Tâches B3.14 et B3.15 proposées (Q-46). |
+| A-36 | Trou | Validité, expiration et statuts d'un devis absents. | F05 §7, 8 | **[HYPOTHÈSE]** émis / accepté / expiré, 7 jours (Q-30). |
+| A-37 | Incohérence | API indicative : `PATCH /rate-cards/{id}` **crée** une version ; `/zones`, `/rate-cards`, `/quotes/preview` sans agence dans le chemin ; « 400/422 » (voir A-13). | F05 §API ; CL | Routes d'action rattachées à l'agence du chemin, à fixer en S2 ; 400 / 409 selon `CLAUDE.md`. |
+| A-38 | Dépendance | Les caractères de format (`\p{Cf}`) ne sont pas encore refusés dans le nom commercial (durcissement B2.13 non livré). | PG B2.13 ; RSB2 | Contrôle à la publication et masquage (Q-45) ; livrer B2.13 avant ou avec B3.9. |
+
+### B3.4 Glossaire du lot
+
+| Terme | Définition | Source |
+|---|---|---|
+| Zone tarifaire | La zone desservie de l'onboarding (ville, quartier facultatif), utilisée comme destination dans la grille. | D-15 |
+| Grille tarifaire | Barème de livraison propre à une agence, fait de versions successives. Une par agence **[HYPOTHÈSE]**. | F05 ; RM-05-05 |
+| Version (de grille) | Barème complet, numéroté, immuable ; la dernière est « en vigueur ». | PH B3.5 |
+| Tranche | Borne supérieure de poids (incluse) et prix associé, pour une zone. **[HYPOTHÈSE] D-05** | Q-20 |
+| Poids taxable | Poids réel, ou poids volumétrique s'il est plus grand et que la version a un diviseur ; arrondi au gramme supérieur. **[HYPOTHÈSE]** | Q-21, Q-23 |
+| Hors barème | Poids taxable supérieur à la dernière borne de la zone. | RG-05-06-04 |
+| Simulation | Calcul indicatif non enregistré. | UC-05-06 |
+| Devis | Proposition chiffrée, référencée, datée, figée à l'émission ; émis, accepté ou expiré. | UC-05-07 |
+| Prix retenu | Prix du devis : calculé, ou manuel avec motif. **[HYPOTHÈSE]** | Q-31 |
+| Fiche publique | Projection en liste fermée d'une agence, publiée par son propriétaire. | F03 ; ADR-10 |
+| Fiche visible | Publiée, agence soumise (ou approuvée), une capacité active, nom publiable. | D-05 ; RG-03-01 |
+| Slug (adresse publique) | Identifiant lisible et stable de la fiche (`express-douala`). | F03 §API |
+| Nom provisoire | Nom attribué par la migration aux agences antérieures : « Agence » + 8 premiers caractères de l'identifiant. | migration `1793777474207` |
+| Non vérifiée | Mention d'une agence soumise non encore approuvée par l'admin plateforme. | D-05 |
+| Tarifs indicatifs | Prix « à partir de » par zone, non garantis sans devis. | RM-03-05 |
+
+### B3.5 Matrice de traçabilité
+
+| Exigence | 05-01 | 05-02 | 05-03 | 05-04 | 05-05 | 05-06 | 05-07 | 05-08 | 03-01 | 03-02 | 03-03 | 03-04 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| RM-05-01 | | X | X | | X | | X | X | | | | X |
+| RM-05-02 | | | X | | | | X | X | | | X | |
+| RM-05-03 | | | | X | X | X | | | | | | |
+| RM-05-04 | | | | X | X | X | X | | | | | |
+| RM-05-05 | X | X | | X | X | X | X | | | | | |
+| RM-03-01 | | | | | | | | | X | X | X | X |
+| RM-03-05 | | | | | | X | | | X | | | X |
+| EX-05-001 isolation 404 | X | X | | X | X | X | X | X | | | | |
+| EX-05-002 rôle 403 | | X | | X | X | | | | | | | |
+| EX-05-003 tenant serveur | X | X | | X | X | X | X | X | | | | |
+| EX-05-004 concurrence | | X | X | X | X | | X | X | | | | |
+| EX-05-005 audit | | X | | X | X | | X | X | | | | |
+| EX-05-008, 009 historique | | | X | X | X | | X | X | | | | |
+| EX-05-010 idempotence | | | | | | | X | | | | | |
+| EX-05-011 ni paiement ni notification | | | | | | | X | X | | | | |
+| EX-05-012 D-05 | | | | X | | X | | | | | | |
+| EX-03-001 public, débit | | | | | | | | | | X | X | X |
+| EX-03-002 liste fermée | | | | | | | | | X | X | | X |
+| EX-03-003 introuvable uniforme | | | | | | | | | X | X | X | X |
+| EX-03-004 curseur, filtres | | | | | | | | | | X | X | |
+| EX-03-005 description texte | | | | | | | | | X | | | X |
+| EX-03-006 `\p{Cf}` | | | | | | | | | X | X | X | |
+| EX-03-007 nom provisoire | | | | | | | | | X | X | | X |
+| EX-03-008 D-05 publication | | | | | | | | | X | X | | X |
+| EX-03-009 index | | | | | | | | | | X | X | |
+| EX-03-010 projection à jour | | X | X | | | | | | X | | | X |
+| EX-03-011, 013, 014 publication | | | | | | | | | X | | | |
