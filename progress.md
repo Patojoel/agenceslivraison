@@ -18,10 +18,10 @@ Tableau de bord vivant du projet. Le détail de chaque tâche (règles, endpoint
 
 | Élément | Valeur |
 |---|---|
-| Lot backend courant | B3 — tarifs, zones, marketplace publique : S1 terminé, décisions D-05 et D-22 à D-25 prises (2026-11-04) ; S2 (plan) à valider |
+| Lot backend courant | B3 — tarifs, zones, marketplace publique : S2 validé (2026-11-04, 5 tranches) ; tranche 1 en cours |
 | Branche | `refactor/architecture-normalisee` |
 | Mode de session | light (session du 2026-11-03) |
-| Tâches en cours | `[~]` B3.S2 — plan du lot (session principale), en attente de validation du user |
+| Tâches en cours | `[~]` B3 tranche 1 — B2.13 + B2.15 + B3.2 (`back-builder`) |
 
 ### Refactor architecture + TypeORM — commité (2026-11-03)
 Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranchée en faveur de TypeORM et de l'architecture normalisée. `CLAUDE.md`, les agents (`back-builder`, `archi-reviewer`, `query-perf`), `phases.md` et `backend/docs/` sont alignés. Décision et conventions : [docs/architecture/](docs/architecture/).
@@ -35,7 +35,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | B0 | Socle technique | terminé (sauvegarde à valider en cible) | 11/12 |
 | B1 | Identité, sessions, memberships | terminé, re-vérifié après refactor (rate limit partagé et constats de revue B1.13–B1.14 à traiter) | 11/14 |
 | B2 | Onboarding agence | **terminé** (S1–S10) ; durcissements B2.13 et B2.15 reportés | 13/15 |
-| B3 | Tarifs, zones, marketplace publique | en cours (S1 fait, S2 en cours) | 0/15 |
+| B3 | Tarifs, zones, marketplace publique | en cours (S1, S2 faits ; tranche 1 en cours) | 0/15 |
 | B4 | Clients, commerçants, demandes | à faire | 0/14 |
 | B5 | Commandes, colis, suivi | à faire | 0/17 |
 | B6 | Livreurs, missions | à faire | 0/18 |
@@ -107,11 +107,11 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [x] B2.11 *(revue sécurité, à corriger)* `contactEmail` : validation Zod alignée sur B1 (`trim().email()`, `''` et `null` effacent) et défense du domaine (`p{Cc}`, `p{Cf}` refusés) ; NUL, BEL, U+202E : 400 au lieu de 500 ; `Email` partagé inchangé
 - [x] B2.12 *(revue sécurité, à corriger)* audit des zones et sites : colonne `identity_audit.resource_id` (migration `1793785151369-audit-resource-id`), renseignée pour les 6 actions zone et site, `NULL` ailleurs
 - [x] B2.14 *(ajoutée le 2026-11-04, D-20)* `GET /agencies/{id}` (identité complète) réservée au propriétaire et à l'administrateur : l'agent reçoit 403 (rôle lu dans la même requête que le filtre de membership) ; il garde l'état d'onboarding, les zones, les sites et la liste des membres ; 404 uniforme inchangé
-- [ ] B2.13 *(revue sécurité, durcissement)* borner l'agrégat `Agency` (plafond de sites et de zones totales, chargement des seules données actives) ; vérifier le membership avant de poser `FOR UPDATE` (contention par un étranger) ; une seule définition des caractères refusés pour tous les textes d'agence (`p{Cc}` sauf tab/LF/CR, `p{Cf}`) et largeurs nulles exclues de l'unicité des zones et sites
-- [ ] B2.15 *(contre-revue sécurité, durcissement — avant tout nouveau rôle d'agence en B6 ou B10)* `managesAgencyIdentity` en liste autorisée exhaustive (`Record<AgencyRole, boolean>`), un test parcourt `AGENCY_ROLES`
+- [~] B2.13 *(revue sécurité, durcissement — tranche 1 de B3)* borner l'agrégat `Agency` (plafond de sites et de zones totales, chargement des seules données actives) ; vérifier le membership avant de poser `FOR UPDATE` (contention par un étranger) ; une seule définition des caractères refusés pour tous les textes d'agence (`p{Cc}` sauf tab/LF/CR, `p{Cf}`) et largeurs nulles exclues de l'unicité des zones et sites
+- [~] B2.15 *(contre-revue sécurité, durcissement, tranche 1 de B3 — avant tout nouveau rôle d'agence en B6 ou B10)* `managesAgencyIdentity` en liste autorisée exhaustive (`Record<AgencyRole, boolean>`), un test parcourt `AGENCY_ROLES`
 
 ### B3 — Tarifs, zones, marketplace publique (CRITIQUE)
-Étapes : [x] S1 use cases (12 UC, 138 scénarios, 128 tests prévus ; `docs/use-cases/05-tarifs-zones/`, `docs/use-cases/03-marketplace-publique/` ; UC-05-01 et UC-05-03 complètent UC-02-03, D-15) · [~] S2 · [ ] S3 · [ ] S4 · [ ] S5 · [ ] S6 · [ ] S7 · [ ] S8 · [ ] S9 · [ ] S10
+Étapes : [x] S1 use cases (12 UC, 138 scénarios, 128 tests prévus ; `docs/use-cases/05-tarifs-zones/`, `docs/use-cases/03-marketplace-publique/` ; UC-05-01 et UC-05-03 complètent UC-02-03, D-15) · [x] S2 plan validé (2026-11-04, 5 tranches : 1) B2.13 + B2.15 + B3.2 ; 2) B3.4 + B3.5 + B3.14 + B3.6 + compléments B3.1, B3.3 ; 3) B3.7 + B3.8 + B3.15 ; 4) B3.9 ; 5) B3.10 à B3.13) · [ ] S3 · [ ] S4 · [ ] S5 · [ ] S6 · [ ] S7 · [ ] S8 · [ ] S9 · [ ] S10
 - [ ] B3.1 Créer zone
 - [ ] B3.2 Modifier zone
 - [ ] B3.3 Désactiver zone
@@ -360,6 +360,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | D-12 | Détecter une migration TypeORM modifiée après application (empreinte par migration) ; afficher ou non au migrateur le motif d'un refus d'adoption Drizzle (message sans donnée) | B10.18 | ouverte |
 
 Décisions prises :
+- 2026-11-04 — **Plan B3 (S2)** validé : modules `pricing` (grille versionnée immuable, simulation, devis) et `marketplace` (fiche publique, annuaire) ; aucun accès aux tables d'`agencies` : un service de lecture exposé par `agencies` (rôle de l'appelant, zones actives, état de la livraison, données publiables), consommé derrière un port propre à chaque module, droits en `Record<AgencyRole, boolean>` exhaustif ; clé étrangère `(agency_id, zone_id)` vers `service_zones` (écart documenté : contrainte, pas lecture) ; projection `public_agency_listings` reconstruite par un subscriber in-process dans la transaction de l'action (`events.md` à amender) ; routes privées sous `/agencies/{id}/…` (anomalie A-37) ; curseur opaque pour la recherche publique ; B2.13 et B2.15 livrés en tranche 1.
 - 2026-11-04 — **D-05 (barème)**, **D-22**, **D-23**, **D-24**, **D-25** : hypothèses par défaut des use cases B3 retenues.
   - D-05 : une grille de livraison par agence ; prix par tranches de poids (borne incluse) et par zone de destination, sans distance ni zone d'origine ; poids volumétrique facultatif (diviseur fixé par version, dimensions en cm) ; francs CFA entiers de 1 à 10 000 000, saisis taxes comprises, sans calcul de taxe ; poids taxable arrondi au gramme supérieur ; une nouvelle version s'applique immédiatement ; pas de tarif de stockage en B3.
   - D-22 : destinataire = nom + téléphone `+237` facultatif, privés à l'agence ; devis valable 7 jours ; prix manuel permis avec motif ; tout membre actif (agent compris) émet et enregistre l'acceptation au nom du client ; acceptation refusée si la zone est retirée ou la livraison suspendue ; aucune commande créée en B3 ; référence `DEV-AAAA-NNNNNN`.
@@ -384,6 +385,7 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-04 | user + session principale | B3.S2 — plan du lot validé | 5 tranches ; trois défauts retenus (découpage, projection publique in-process dans la transaction, routes sous `/agencies/{id}` et curseur opaque) ; tranche 1 lancée | aucune |
 | 2026-11-04 | user + session principale | Décisions D-05 (barème), D-22, D-23, D-24, D-25 | Hypothèses par défaut des use cases B3 retenues ; B3.S2 (plan) lancé | aucune |
 | 2026-11-04 | `use-case-writer` (mode light, rapport appliqué par la session principale) | B3.S1 — use cases tarifs, zones, marketplace publique | 12 UC (UC-05-01 et UC-05-03 en complément de UC-02-03, D-15), 138 scénarios (109 scénarios + 29 plans), 128 tests TDD prévus, 21 anomalies (A-18 à A-38), 28 questions (Q-20 à Q-47) ; couverture UC 12/12, RM 7/7 ; tâches B3.14 et B3.15 ajoutées (plan modifié, `phases.md` mis à jour) ; note B3.9 alignée sur D-05 (A-20) ; décisions D-22 à D-25 ouvertes ; en attente du user | aucune (documentation) |
 | 2026-11-04 | user + session principale | D-05 (règle de publication) ; push de la branche | Agence soumise publiable avec la mention « non vérifiée » ; barèmes, taxes et arrondi encore ouverts | `git push` |
