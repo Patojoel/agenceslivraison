@@ -1,3 +1,4 @@
+import { AgencyRole } from '../../domain/agency-role';
 import { AgencyStatus } from '../../domain/agency.snapshot';
 
 export interface AgencyIdentityReadModel {
@@ -18,4 +19,10 @@ export interface AgencyReadModel {
   readonly description: string | null;
   readonly identity: AgencyIdentityReadModel;
   readonly version: number;
+}
+
+/** The agency with the role of the reader in it: the role decides whether the identity may be shown. */
+export interface MemberAgencyReadModel {
+  readonly role: AgencyRole;
+  readonly agency: AgencyReadModel;
 }

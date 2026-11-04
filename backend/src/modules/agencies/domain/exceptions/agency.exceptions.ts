@@ -70,6 +70,11 @@ export class AgencyEditForbidden extends DomainException {
   constructor() { super('forbidden', 'Not allowed to edit this agency'); }
 }
 
+/** An active agent knows the agency, so this is a refusal and not a "not found"; it carries nothing of the agency. */
+export class AgencyIdentityReadForbidden extends DomainException {
+  constructor() { super('forbidden', 'Not allowed to read the identity of this agency'); }
+}
+
 /** Unknown zone, or one that belongs to another agency: the same answer. */
 export class ServiceZoneNotFound extends DomainException {
   constructor() { super('not_found', 'Service zone not found'); }

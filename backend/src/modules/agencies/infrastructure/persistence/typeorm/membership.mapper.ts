@@ -1,10 +1,8 @@
 import { UserId } from '@shared/domain/value-objects/user-id';
 import { Membership } from '../../../domain/agency-team';
-import { AGENCY_ROLES, AgencyRole } from '../../../domain/agency-role';
+import { isAgencyRole } from '../../../domain/agency-role';
 import { MembershipId } from '../../../domain/value-objects/membership-id';
 import { AgencyMembershipOrmEntity } from './agency-membership.orm-entity';
-
-const isAgencyRole = (value: string): value is AgencyRole => AGENCY_ROLES.some(role => role === value);
 
 export class MembershipMapper {
   static toDomain(entity: AgencyMembershipOrmEntity): Membership {

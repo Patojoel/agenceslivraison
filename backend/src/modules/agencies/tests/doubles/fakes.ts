@@ -1,6 +1,6 @@
 import { UserId } from '@shared/domain/value-objects/user-id';
 import { ReadAgencyRepository } from '../../application/ports/read-agency.repository';
-import { AgencyReadModel } from '../../application/read-models/agency.read-model';
+import { AgencyReadModel, MemberAgencyReadModel } from '../../application/read-models/agency.read-model';
 import { ActiveMembersCriteria, ReadAgencyMemberRepository } from '../../application/ports/read-agency-member.repository';
 import { AgencyMemberReadModel } from '../../application/read-models/agency-member.read-model';
 import { ReadAgencyOnboardingRepository } from '../../application/ports/read-agency-onboarding.repository';
@@ -107,7 +107,7 @@ export class InMemoryAgencyTeamRepository implements AgencyTeamRepository {
   }
 }
 
-/** Rows are `[agencyId, userId of an active member, projection]`. */
+/** Rows are `[agencyId, userId of an active member, role, projection]`. */
 export class InMemoryReadAgencyOnboardingRepository implements ReadAgencyOnboardingRepository {
   constructor(private readonly rows: readonly [string, string, AgencyOnboardingReadModel][]) {}
 
@@ -116,12 +116,13 @@ export class InMemoryReadAgencyOnboardingRepository implements ReadAgencyOnboard
   }
 }
 
-/** Rows are `[agencyId, userId of an active member, projection]`. */
+/** Rows are `[agencyId, userId of an active member, role, projection]`. */
 export class InMemoryReadAgencyRepository implements ReadAgencyRepository {
-  constructor(private readonly rows: readonly [string, string, AgencyReadModel][]) {}
+  constructor(private readonly rows: readonly [string, string, AgencyRole, AgencyReadModel][]) {}
 
-  async findForMember(agencyId: string, userId: string): Promise<AgencyReadModel | null> {
-    return this.rows.find(([agency, user]) => agency === agencyId && user === userId)?.[2] ?? null;
+  async findForMember(agencyId: string, userId: string): Promise<MemberAgencyReadModel | null> {
+    const row = this.rows.find(([agency, user]) => agency === agencyId && user === userId);
+    return row ? { role: row[2], agency: row[3] } : null;
   }
 }
 

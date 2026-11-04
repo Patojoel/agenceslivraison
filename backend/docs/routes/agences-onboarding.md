@@ -92,7 +92,7 @@ Aucun champ ne dit qu'une agence est « vérifiée », « certifiée » ou « as
 
 `GET /api/v1/agencies/{agencyId}`
 
-Lisible par tout **membre actif** (`owner`, `admin`, `agent`) ; non-membre, ancien membre, autre agence et agence inexistante reçoivent le même **404**. `agencyId` non UUID : 400. Lecture seule. La réponse porte la version dans le corps et dans l'en-tête `ETag` (`"3"`) : c'est la valeur à renvoyer dans `If-Match` pour modifier.
+Lisible par le **propriétaire** et l'**administrateur** seulement (D-20). Un **agent actif** reçoit **403** (Problem Details, sans aucune donnée de l'agence) : il lit l'état d'onboarding, les zones, les sites et les membres, pas l'identité complète. Non-membre, ancien membre, autre agence et agence inexistante reçoivent le même **404** : tout membre actif reçoit 200 ou 403 selon son rôle, jamais 404. `agencyId` non UUID : 400. Lecture seule. La réponse porte la version dans le corps et dans l'en-tête `ETag` (`"3"`) : c'est la valeur à renvoyer dans `If-Match` pour modifier.
 
 ```json
 {
@@ -104,7 +104,7 @@ Lisible par tout **membre actif** (`owner`, `admin`, `agent`) ; non-membre, anci
 }
 ```
 
-Un champ non renseigné vaut `null`. Ce sont des données professionnelles de l'agence, réservées à ses membres (non publiées avant B3). Statuts : 200, 400, 401, 404, 503.
+Un champ non renseigné vaut `null`. Ce sont des données professionnelles de l'agence, réservées à ses propriétaires et administrateurs (non publiées avant B3). Statuts : 200, 400, 401, 403 (agent), 404, 503.
 
 ## Compléter l'identité
 

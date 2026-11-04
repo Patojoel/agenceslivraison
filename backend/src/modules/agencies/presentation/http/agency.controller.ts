@@ -100,7 +100,7 @@ export class AgencyController {
 
   @Get(':agencyId')
   @Header('Cache-Control', 'no-store')
-  @ApiOperation({ summary: 'Lit l’agence : statut, profil, identité et version (aussi dans l’en-tête ETag).' })
+  @ApiOperation({ summary: 'Lit l’agence : statut, profil, identité et version (aussi dans l’en-tête ETag). Propriétaire et administrateur ; 403 pour un agent.' })
   @ApiOkResponse({ schema: AGENCY_SCHEMA, headers: { ETag: { description: 'La version de l’agence, entre guillemets (`"3"`).', schema: { type: 'string' } } } })
   async read(
     @CurrentUser() user: AuthenticatedUser,

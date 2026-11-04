@@ -18,10 +18,10 @@ Tableau de bord vivant du projet. Le détail de chaque tâche (règles, endpoint
 
 | Élément | Valeur |
 |---|---|
-| Lot backend courant | B2 — Onboarding agence (B2.11–B2.12 faites ; B2.14 en cours, puis contre-revue et clôture) |
+| Lot backend courant | B2 — Onboarding agence (B2.11, B2.12, B2.14 faites ; contre-revue sécurité puis clôture S10) |
 | Branche | `refactor/architecture-normalisee` |
 | Mode de session | light (session du 2026-11-03) |
-| Tâches en cours | `[~]` B2.14 — `GET /agencies/{id}` réservée au propriétaire et à l'administrateur (D-20, `back-builder`) |
+| Tâches en cours | `[~]` B2.S9 — contre-revue `security-reviewer` des corrections B2.11, B2.12, B2.14 |
 
 ### Refactor architecture + TypeORM — commité (2026-11-03)
 Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranchée en faveur de TypeORM et de l'architecture normalisée. `CLAUDE.md`, les agents (`back-builder`, `archi-reviewer`, `query-perf`), `phases.md` et `backend/docs/` sont alignés. Décision et conventions : [docs/architecture/](docs/architecture/).
@@ -34,7 +34,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 |---|---|---|---|
 | B0 | Socle technique | terminé (sauvegarde à valider en cible) | 11/12 |
 | B1 | Identité, sessions, memberships | terminé, re-vérifié après refactor (rate limit partagé et constats de revue B1.13–B1.14 à traiter) | 11/14 |
-| B2 | Onboarding agence | revue faite, corrections B2.11–B2.12 faites ; B2.14 (D-20) puis clôture ; B2.13 durcissement | 12/14 |
+| B2 | Onboarding agence | corrections de revue et D-20 faites ; contre-revue puis clôture ; B2.13 durcissement reporté | 13/14 |
 | B3 | Tarifs, zones, marketplace publique | à faire | 0/13 |
 | B4 | Clients, commerçants, demandes | à faire | 0/14 |
 | B5 | Commandes, colis, suivi | à faire | 0/17 |
@@ -106,7 +106,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [x] B2.10 *(ajoutée le 2026-11-04, anomalie A-09)* Lister les membres d'une agence — `GET /agencies/{id}/members` (curseur, tout membre actif, sans e-mail : voir D-18)
 - [x] B2.11 *(revue sécurité, à corriger)* `contactEmail` : validation Zod alignée sur B1 (`trim().email()`, `''` et `null` effacent) et défense du domaine (`p{Cc}`, `p{Cf}` refusés) ; NUL, BEL, U+202E : 400 au lieu de 500 ; `Email` partagé inchangé
 - [x] B2.12 *(revue sécurité, à corriger)* audit des zones et sites : colonne `identity_audit.resource_id` (migration `1793785151369-audit-resource-id`), renseignée pour les 6 actions zone et site, `NULL` ailleurs
-- [ ] B2.14 *(ajoutée le 2026-11-04, D-20)* `GET /agencies/{id}` (identité complète) réservée au propriétaire et à l'administrateur : l'agent reçoit 403 ; il garde l'état d'onboarding, les zones, les sites et la liste des membres
+- [x] B2.14 *(ajoutée le 2026-11-04, D-20)* `GET /agencies/{id}` (identité complète) réservée au propriétaire et à l'administrateur : l'agent reçoit 403 (rôle lu dans la même requête que le filtre de membership) ; il garde l'état d'onboarding, les zones, les sites et la liste des membres ; 404 uniforme inchangé
 - [ ] B2.13 *(revue sécurité, durcissement)* borner l'agrégat `Agency` (plafond de sites et de zones totales, chargement des seules données actives) ; vérifier le membership avant de poser `FOR UPDATE` (contention par un étranger)
 
 ### B3 — Tarifs, zones, marketplace publique (CRITIQUE)
@@ -375,6 +375,7 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2.14 — identité d'agence réservée au propriétaire et à l'administrateur (D-20) | Vert ; rouges constatés en unitaire (2 échecs sur 3) et en E2E (`200 !== 403`) ; aucune migration ; règle `managesAgencyIdentity` commune à la lecture et à l'édition | `npm run lint` OK · `npm run typecheck` OK · `npm test` 220/220 (relancé par la session principale) · `npm run build` OK · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
 | 2026-11-04 | user + session principale | Décision D-20 | Identité complète réservée au propriétaire et à l'administrateur ; tâche B2.14 ajoutée (plan modifié, `phases.md` mis à jour) | aucune |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B2.11 + B2.12 — corrections de la revue sécurité | Vert ; rouges constatés en unitaire et en E2E (`500 !== 400`) ; migration `1793785151369-audit-resource-id` | `npm run lint` OK · `npm run typecheck` OK · `npm test` 219/219 (relancé par la session principale) · `npm run build` OK · `migration:check` « No changes » · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
 | 2026-11-04 | `security-reviewer` (mode light, rapport appliqué par la session principale) | B2.S9 — revue sécurité du lot B2 (`7a2cf3f`…`43e4f99`) | Aucun critique ; isolation, droits D-13, idempotence, concurrence, SQL et migrations jugés sains ; 2 à corriger (B2.11 `contactEmail` NUL → 500, B2.12 audit sans ressource) ; 6 durcissements (B2.13, notes B3.9, B10.18) ; D-20 et D-21 ouvertes | `git diff 8725e8b 43e4f99 -- backend`, lecture du code, des migrations et de `test/e2e.cjs` ; aucun test relancé |

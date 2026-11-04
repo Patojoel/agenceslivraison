@@ -290,13 +290,20 @@ const { Client } = require('pg');
       const row = async () => (await agencyPool.query('SELECT * FROM agencies WHERE id = $1', [editable])).rows[0];
       const edited = async () => (await agencyPool.query("SELECT action, user_id, details FROM identity_audit WHERE agency_id = $1 AND action IN ('agency.identity_updated', 'agency.profile_updated') ORDER BY occurred_at, id", [editable])).rows;
 
-      for (const [role, access] of [['owner', tokens.accessToken], ['admin', adminAccess], ['agent', invitedTokens.accessToken]]) {
+      for (const [role, access] of [['owner', tokens.accessToken], ['admin', adminAccess]]) {
         const read = await getAgency(access, editable);
         assert.equal(read.status, 200, `${role} reads the agency`);
         assert.equal(read.headers.get('etag'), '"1"', `${role} gets the version as an ETag`);
         assert.match(read.headers.get('cache-control'), /no-store/);
         assert.deepEqual(await read.json(), { id: editable, status: 'draft', tradeName: 'Edition Express', description: null, version: 1, identity: { legalName: null, headquartersCity: null, headquartersAddress: null, primaryPhone: null, contactEmail: null, rccm: null, niu: null } });
       }
+      const agentRead = await getAgency(invitedTokens.accessToken, editable);
+      assert.equal(agentRead.status, 403, 'an active agent does not read the identity');
+      assert.ok(agentRead.headers.get('content-type').startsWith('application/problem+json'));
+      const agentBody = await agentRead.text();
+      for (const secret of ['legalName', 'primaryPhone', 'contactEmail', 'rccm', 'niu', 'Express Douala SARL', '+237677123456', 'Edition Express']) assert.ok(!agentBody.includes(secret), `the refusal does not carry ${secret}`);
+      assert.equal(JSON.parse(agentBody).status, 403);
+      for (const part of ['onboarding', 'zones', 'sites', 'members']) assert.equal((await fetch(`${api}/agencies/${editable}/${part}`, { headers: authHeaders(invitedTokens.accessToken) })).status, 200, `an agent still reads ${part}`);
       const unknownRead = await getAgency(tokens.accessToken, unknownAgency);
       assert.equal(unknownRead.status, 404);
       const unknownBody = withoutEcho(await unknownRead.json());
@@ -327,7 +334,7 @@ const { Client } = require('pg');
       assert.equal(secondEdit.status, 200, 'an administrator completes the identity, a bare version is accepted');
       const secondBody = await secondEdit.json();
       assert.deepEqual([secondBody.version, secondBody.identity.primaryPhone, secondBody.identity.legalName], [3, '+237677123456', 'Express Douala SARL'], 'partial update keeps the other fields');
-      assert.equal((await getAgency(invitedTokens.accessToken, editable)).headers.get('etag'), '"3"');
+      assert.equal((await getAgency(adminAccess, editable)).headers.get('etag'), '"3"');
       const afterIdentity = await (await getOnboarding(tokens.accessToken, editable)).json();
       assert.deepEqual(afterIdentity.prerequisites.filter(item => item.filled).map(item => item.code), ['legal_name', 'headquarters_city', 'headquarters_address', 'primary_phone'], 'the four identity prerequisites are met');
 
