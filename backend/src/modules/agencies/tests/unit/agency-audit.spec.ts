@@ -8,6 +8,7 @@ test('agency events are audited with the agency and, when relevant, the affected
   const audit = new InMemoryAuditLog();
   const subscriber = new AgencyAuditSubscriber(audit);
   const events: AgencyEvent[] = [
+    { type: 'AgencyRegistered', agencyId: uuid(10), actorId: uuid(1) },
     { type: 'InvitationIssued', agencyId: uuid(10), actorId: uuid(1) },
     { type: 'InvitationAccepted', agencyId: uuid(10), userId: uuid(7) },
     { type: 'MembershipRoleChanged', agencyId: uuid(10), actorId: uuid(1), subjectUserId: uuid(3) },
@@ -15,6 +16,7 @@ test('agency events are audited with the agency and, when relevant, the affected
   ];
   for (const event of events) await subscriber.handle(event);
   assert.deepEqual(audit.entries, [
+    { userId: uuid(1), action: 'agency.created', agencyId: uuid(10) },
     { userId: uuid(1), action: 'invitation.created', agencyId: uuid(10) },
     { userId: uuid(7), action: 'invitation.accepted', agencyId: uuid(10), subjectUserId: uuid(7) },
     { userId: uuid(1), action: 'membership.role_changed', agencyId: uuid(10), subjectUserId: uuid(3) },

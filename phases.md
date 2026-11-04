@@ -116,7 +116,7 @@ Chaque phase B suit ces étapes ; elles sont cochées par lot dans `progress.md`
   - B2.10 *(ajoutée le 2026-11-04, anomalie A-09 des use cases)* Lister les membres d'une agence — `GET /agencies/{id}/members` (curseur, membres actifs de l'agence de l'appelant uniquement) ; nécessaire à F1.3.
 - **Règles** : RM-02-01 agence non approuvée peut rester brouillon ; RM-02-02 capacité = configuration minimale ; RM-02-03 suspension sans effacement ; RM-02-04 vérification ≠ assurance.
 - **Événements** : `AgencyRegistered`, `AgencyCapabilityEnabled` (+ audit).
-- **Use cases** : `docs/use-cases/02-agences-onboarding/` (S1, 2026-11-04). **Décisions attendues** : D-04, D-13 (rôles), D-14 (idempotence, second envoi), D-15 (zone desservie = zone tarifaire ?).
+- **Use cases** : `docs/use-cases/02-agences-onboarding/` (S1, 2026-11-04). **Décisions prises le 2026-11-04** (détail dans `progress.md`) : D-04 (identité, configuration minimale, statuts), D-13 (propriétaire + administrateur configurent, propriétaire seul soumet), D-14 (`Idempotency-Key` à la création, 409 sur second envoi), D-15 (zone desservie = zone tarifaire de B3).
 - **À VALIDER** : champs et documents obligatoires de l'identité ; configuration minimale de chaque capacité ; statuts après `submitted` (approbation en B10/admin) ; critères de certification, responsables, expiration.
 - **Critère de sortie** : agence brouillon → soumise, validations, isolation entre agences.
 
@@ -312,6 +312,7 @@ Chaque phase B suit ces étapes ; elles sont cochées par lot dans `progress.md`
   - B10.18 Revue sécurité globale, correlationId dans les logs, logs sans secret.
   - B10.19 Rate limiting partagé, évaluation RLS PostgreSQL en défense supplémentaire.
   - B10.20 Sauvegarde et restauration validées sur l'infrastructure cible.
+  - B10.21 *(ajoutée le 2026-11-04)* Purge des `idempotency_keys` (table introduite en B2.1) selon la rétention décidée (D-16).
 - **À VALIDER** : responsables de validation des agences ; quotas des abonnements (facturation reportée).
 - **Critère de sortie** : mesures, audit, performances.
 

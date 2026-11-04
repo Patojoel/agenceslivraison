@@ -6,6 +6,12 @@ import { Env, resolveDatabaseUrl } from './env.schema';
 
 export const MIGRATIONS_TABLE = 'typeorm_migrations';
 
+/** Names of the migration files in the order TypeORM runs them (by timestamp), whatever order they were discovered in. */
+export const orderedMigrationNames = (migrations: readonly { name?: string; constructor: { name: string } }[]): string[] =>
+  migrations
+    .map(migration => migration.name ?? migration.constructor.name)
+    .sort((left, right) => Number(left.slice(-13)) - Number(right.slice(-13)));
+
 export const buildDataSourceOptions = (env: Pick<Env, 'DATABASE_URL' | 'DATABASE_URL_FILE'>): DataSourceOptions => ({
   type: 'postgres',
   url: resolveDatabaseUrl(env),

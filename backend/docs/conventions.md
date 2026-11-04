@@ -10,6 +10,6 @@
 
 ## Conventions cibles — non garanties par le code actuel
 
-Le cadrage prévoit du JSON en `camelCase`, des listes `{ items, nextCursor, hasMore }`, des filtres autorisés et des limites bornées. Les erreurs devraient suivre RFC 9457 (`type`, `title`, `status`, `detail`, `instance`, `code`, `fieldErrors`, `traceId`). Les mutations critiques devraient utiliser `Idempotency-Key` ; les mises à jour sensibles à la concurrence devraient utiliser `If-Match` ou une version d'agrégat. Ces éléments doivent être documentés et vérifiés lors de leur implémentation avant que les clients en dépendent.
+Le cadrage prévoit du JSON en `camelCase`, des listes `{ items, nextCursor, hasMore }`, des filtres autorisés et des limites bornées. Les erreurs devraient suivre RFC 9457 (`type`, `title`, `status`, `detail`, `instance`, `code`, `fieldErrors`, `traceId`). Les mutations critiques devraient utiliser `Idempotency-Key` (déjà en place, facultative, sur `POST /agencies` : voir [Agences et onboarding](routes/agences-onboarding.md)) ; les mises à jour sensibles à la concurrence devraient utiliser `If-Match` ou une version d'agrégat. Ces éléments doivent être documentés et vérifiés lors de leur implémentation avant que les clients en dépendent.
 
 Les interfaces web et mobiles utiliseront le même backend avec des autorisations propres à l'acteur et à l'agence active. Ne jamais supposer qu'un identifiant d'agence envoyé par le client suffit pour accéder à ses données. Les choix de connexion, stockage des sessions et rôles restent à implémenter et valider.

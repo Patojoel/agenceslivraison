@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import dataSource from '@config/typeorm-cli.config';
-import { MIGRATIONS_TABLE } from '@config/typeorm.config';
+import { MIGRATIONS_TABLE, orderedMigrationNames } from '@config/typeorm.config';
 
 const MIGRATION_LOCK = 19188412;
 
@@ -13,7 +13,7 @@ async function migrate(): Promise<void> {
     await runner.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK]);
     const [table]: { exists: boolean }[] = await runner.query(`SELECT to_regclass('public.${MIGRATIONS_TABLE}') IS NOT NULL AS exists`);
     if (table?.exists) {
-      const files = dataSource.migrations.map(migration => migration.name ?? migration.constructor.name);
+      const files = orderedMigrationNames(dataSource.migrations);
       const applied: { name: string }[] = await runner.query(`SELECT name FROM ${MIGRATIONS_TABLE} ORDER BY id`);
       if (applied.length > files.length || applied.some((row, index) => row.name !== files[index])) {
         throw new Error('Migration history does not match files');

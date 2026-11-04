@@ -6,6 +6,8 @@ import { AgencyEvent, isAgencyEvent } from '../../domain/events/agency-events';
 
 function toAuditEntry(event: AgencyEvent): AuditEntry {
   switch (event.type) {
+    case 'AgencyRegistered':
+      return { userId: event.actorId, action: 'agency.created', agencyId: event.agencyId };
     case 'InvitationIssued':
       return { userId: event.actorId, action: 'invitation.created', agencyId: event.agencyId };
     case 'InvitationAccepted':

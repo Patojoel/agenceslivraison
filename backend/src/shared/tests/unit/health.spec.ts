@@ -35,3 +35,9 @@ test('readiness fails when the applied history differs from the files', async ()
 test('readiness succeeds once every migration has run', async () => {
   assert.deepEqual(await controller(dataSource([BASELINE])).ready(), { status: 'ok' });
 });
+
+test('readiness does not depend on the order in which migration files are discovered', async () => {
+  const later = { name: 'Later1793777474207' };
+  const open = async () => ({ migrations: [later, BASELINE], query: async () => [BASELINE, later] }) as unknown as Pick<DataSource, 'migrations' | 'query'>;
+  assert.deepEqual(await controller(open).ready(), { status: 'ok' });
+});

@@ -19,6 +19,11 @@ export class AgencyTeam extends AggregateRoot<AgencyEvent> {
     super();
   }
 
+  /** The creator of an agency is its first owner: an agency never exists without one. */
+  static found(agencyId: AgencyId, membershipId: MembershipId, ownerId: UserId): AgencyTeam {
+    return new AgencyTeam(agencyId, [{ id: membershipId, userId: ownerId, role: 'owner', active: true }]);
+  }
+
   static reconstitute(agencyId: AgencyId, memberships: readonly Membership[]): AgencyTeam {
     return new AgencyTeam(agencyId, memberships);
   }

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { AuditEntry, AuditLog } from '../../application/ports/audit-log.port';
+import { IdempotencyClaim, IdempotencyKeys, IdempotencyOutcome } from '../../application/ports/idempotency-keys.port';
 import { Clock } from '../../domain/ports/clock.port';
 import { DomainEventPublisher } from '../../application/ports/domain-event-publisher.port';
 import { UuidGenerator } from '../../domain/ports/uuid-generator.port';
@@ -78,4 +79,18 @@ export function tokenParts(token: string): [string, string] {
   const [id, secret] = token.split('.');
   if (!id || !secret) throw new Error('malformed opaque token');
   return [id, secret];
+}
+
+export class InMemoryIdempotencyKeys implements IdempotencyKeys {
+  private readonly rows = new Map<string, { fingerprint: string; resourceId: string }>();
+
+  async claim(claim: IdempotencyClaim): Promise<IdempotencyOutcome> {
+    const id = [claim.actorId, claim.scope, claim.key].join('|');
+    const existing = this.rows.get(id);
+    if (!existing) {
+      this.rows.set(id, { fingerprint: claim.fingerprint, resourceId: claim.resourceId });
+      return { kind: 'claimed' };
+    }
+    return existing.fingerprint === claim.fingerprint ? { kind: 'replayed', resourceId: existing.resourceId } : { kind: 'mismatch' };
+  }
 }

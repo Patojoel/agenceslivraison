@@ -1,5 +1,5 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
-import { MIGRATIONS_TABLE } from '@config/typeorm.config';
+import { MIGRATIONS_TABLE, orderedMigrationNames } from '@config/typeorm.config';
 import { TypeOrmDatabaseConnection } from '@shared/infrastructure/persistence/typeorm/typeorm-database-connection';
 
 @Controller('health')
@@ -16,7 +16,7 @@ export class HealthController {
   async ready(): Promise<{ status: 'ok' }> {
     try {
       const dataSource = await this.connection.open();
-      const expected = dataSource.migrations.map(migration => migration.name ?? migration.constructor.name);
+      const expected = orderedMigrationNames(dataSource.migrations);
       const applied = await dataSource.query<{ name: string }[]>(`SELECT name FROM ${MIGRATIONS_TABLE} ORDER BY id`);
       if (expected.length === 0 || applied.length !== expected.length || applied.some((row, index) => row.name !== expected[index])) {
         throw new Error('Migration history mismatch');

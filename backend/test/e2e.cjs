@@ -62,7 +62,7 @@ const { Client } = require('pg');
       const ownerTwo = '00000000-0000-4000-8000-000000000014';
       await pool.query('INSERT INTO users (id) VALUES ($1), ($2)', [userId, secondUser]);
       await pool.query("INSERT INTO sessions (id, user_id, token_digest, expires_at) VALUES ($1, $2, $3, now() + interval '1 hour'), ($4, $5, $6, now() + interval '1 hour')", [userSession, userId, 'a'.repeat(64), secondSession, secondUser, 'b'.repeat(64)]);
-      await pool.query('INSERT INTO agencies (id) VALUES ($1), ($2)', [agencyId, otherAgency]);
+      await pool.query("INSERT INTO agencies (id, trade_name, created_by) VALUES ($1, 'Agence A', $3), ($2, 'Agence B', $3)", [agencyId, otherAgency, userId]);
       await pool.query("INSERT INTO agency_memberships (id, agency_id, user_id, role) VALUES ($1, $3, $4, 'owner'), ($2, $3, $5, 'owner')", [ownerOne, ownerTwo, agencyId, userId, secondUser]);
       const firstAccess = accessFor(userId, userSession);
       const secondAccess = accessFor(secondUser, secondSession);
@@ -124,7 +124,7 @@ const { Client } = require('pg');
       assert.notEqual(storedSession.rows[0].token_digest, tokens.refreshToken.split('.')[1], 'raw refresh secret is not stored');
       assert.match(storedSession.rows[0].token_digest, /^[a-f0-9]{64}$/);
       assert.equal(storedSession.rows[0].long_lived, true, 'session lasts 30 days');
-      await agencyPool.query('INSERT INTO agencies (id) VALUES ($1), ($2)', [httpAgency, foreignAgency]);
+      await agencyPool.query("INSERT INTO agencies (id, trade_name, created_by) VALUES ($1, 'Agence HTTP', $3), ($2, 'Agence etrangere', $3)", [httpAgency, foreignAgency, account.id]);
       await agencyPool.query("INSERT INTO agency_memberships (id, agency_id, user_id, role) VALUES ($1, $3, $4, 'owner'), ($2, $3, $5, 'agent')", [ownerMembership, targetMembership, httpAgency, account.id, '00000000-0000-4000-8000-000000000012']);
       const changeMember = (agency, member, access, role) => fetch(`http://127.0.0.1:3107/api/v1/agencies/${agency}/members/${member}`, { method: 'PATCH', headers: { authorization: `Bearer ${access}`, 'content-type': 'application/json' }, body: JSON.stringify({ role }) });
       assert.equal((await changeMember(foreignAgency, targetMembership, tokens.accessToken, 'admin')).status, 404, 'other agency hidden');
@@ -190,6 +190,93 @@ const { Client } = require('pg');
       assert.deepEqual(race.map(response => response.status).sort(), [200, 404], 'one concurrent acceptance succeeds');
       const raceMembers = await agencyPool.query('SELECT count(*)::int AS total FROM agency_memberships WHERE agency_id = $1 AND user_id = $2', [foreignAgency, invitedUser]);
       assert.equal(raceMembers.rows[0].total, 1, 'a single membership is created');
+      const postAgency = (access, body, key) => fetch(`${api}/agencies`, { method: 'POST', headers: { ...(access ? { authorization: `Bearer ${access}` } : {}), 'content-type': 'application/json', ...(key ? { 'idempotency-key': key } : {}) }, body: JSON.stringify(body) });
+      const getOnboarding = (access, id) => fetch(`${api}/agencies/${id}/onboarding`, { headers: access ? { authorization: `Bearer ${access}` } : {} });
+      const countAgencies = async () => (await agencyPool.query('SELECT count(*)::int AS total FROM agencies')).rows[0].total;
+      const outsider = '00000000-0000-4000-8000-000000000030';
+      const former = '00000000-0000-4000-8000-000000000031';
+      const outsiderAccess = accessFor(outsider, '00000000-0000-4000-8000-000000000032');
+      const formerAccess = accessFor(former, '00000000-0000-4000-8000-000000000033');
+      const revokedAccess = accessFor(outsider, '00000000-0000-4000-8000-000000000034');
+      await agencyPool.query('INSERT INTO users (id) VALUES ($1), ($2)', [outsider, former]);
+      await agencyPool.query("INSERT INTO sessions (id, user_id, token_digest, expires_at, revoked_at) VALUES ($1, $2, $3, now() + interval '1 hour', NULL), ($4, $5, $6, now() + interval '1 hour', NULL), ($7, $2, $8, now() + interval '1 hour', now())", ['00000000-0000-4000-8000-000000000032', outsider, 'c'.repeat(64), '00000000-0000-4000-8000-000000000033', former, 'd'.repeat(64), '00000000-0000-4000-8000-000000000034', 'e'.repeat(64)]);
+
+      const draft = await postAgency(tokens.accessToken, { tradeName: '  Express Douala ' });
+      assert.equal(draft.status, 201, 'a connected person creates an agency');
+      assert.match(draft.headers.get('cache-control'), /no-store/);
+      const created = await draft.json();
+      assert.deepEqual(created, { agencyId: created.agencyId, tradeName: 'Express Douala', status: 'draft', role: 'owner' });
+      const draftRow = await agencyPool.query('SELECT status, trade_name, version, created_by FROM agencies WHERE id = $1', [created.agencyId]);
+      assert.deepEqual(draftRow.rows[0], { status: 'draft', trade_name: 'Express Douala', version: 1, created_by: account.id });
+      const ownerRow = await agencyPool.query('SELECT role, active FROM agency_memberships WHERE agency_id = $1 AND user_id = $2', [created.agencyId, account.id]);
+      assert.deepEqual(ownerRow.rows, [{ role: 'owner', active: true }], 'the creator is the active owner');
+      const mine = await (await fetch(`${api}/me/agencies?limit=100`, { headers: { authorization: `Bearer ${tokens.accessToken}` } })).json();
+      assert.ok(mine.items.some(item => item.agencyId === created.agencyId && item.role === 'owner'), 'the new agency is listed with the owner role');
+      const merchantAgency = await (await postAgency(invitedTokens.accessToken, { tradeName: 'Tchoua Logistique' })).json();
+      assert.equal(merchantAgency.status, 'draft', 'a merchant account can create an agency too');
+
+      const before = await countAgencies();
+      const refused = [{ tradeName: 'A' }, { tradeName: '   ' }, { tradeName: 'x'.repeat(121) }, {}, { tradeName: 5 }, { tradeName: 'Express Kribi', status: 'submitted' }, { tradeName: 'Express Kribi', agencyId: httpAgency }];
+      for (const body of refused) assert.equal((await postAgency(tokens.accessToken, body)).status, 400, `refused ${JSON.stringify(body).slice(0, 60)}`);
+      assert.equal((await postAgency(tokens.accessToken, { tradeName: 'Express Kribi' }, 'short')).status, 400, 'idempotency key too short');
+      assert.equal((await postAgency(tokens.accessToken, { tradeName: 'Express Kribi' }, 'a key with spaces')).status, 400, 'idempotency key with spaces');
+      assert.equal((await postAgency(null, { tradeName: 'Express Kribi' })).status, 401, 'anonymous creation refused');
+      assert.equal((await postAgency(revokedAccess, { tradeName: 'Express Kribi' })).status, 401, 'revoked session cannot create');
+      assert.equal(await countAgencies(), before, 'refused creations leave nothing behind');
+
+      const keyed = await postAgency(tokens.accessToken, { tradeName: 'Express Kribi' }, 'cle-e2e-0001');
+      assert.equal(keyed.status, 201);
+      const keyedBody = await keyed.json();
+      const total = await countAgencies();
+      const replay = await postAgency(tokens.accessToken, { tradeName: ' Express Kribi' }, 'cle-e2e-0001');
+      assert.equal(replay.status, 201, 'an idempotent replay answers like the original');
+      assert.deepEqual(await replay.json(), keyedBody);
+      assert.equal(await countAgencies(), total, 'the replay created nothing');
+      assert.equal((await postAgency(tokens.accessToken, { tradeName: 'Express Limbe' }, 'cle-e2e-0001')).status, 409, 'same key, other content');
+      assert.equal(await countAgencies(), total, 'the conflict created nothing');
+      const otherPerson = await postAgency(invitedTokens.accessToken, { tradeName: 'Express Kribi' }, 'cle-e2e-0001');
+      assert.equal(otherPerson.status, 201, 'a key belongs to its sender');
+      assert.notEqual((await otherPerson.json()).agencyId, keyedBody.agencyId);
+
+      const twins = await Promise.all([postAgency(tokens.accessToken, { tradeName: 'Concurrent Agency' }, 'cle-e2e-0002'), postAgency(tokens.accessToken, { tradeName: 'Concurrent Agency' }, 'cle-e2e-0002')]);
+      assert.deepEqual(twins.map(response => response.status), [201, 201], 'simultaneous identical creations both succeed');
+      const [twinA, twinB] = await Promise.all(twins.map(response => response.json()));
+      assert.equal(twinA.agencyId, twinB.agencyId, 'both responses designate one agency');
+      const twinRows = await agencyPool.query("SELECT (SELECT count(*)::int FROM agencies WHERE trade_name = 'Concurrent Agency') AS agencies, (SELECT count(*)::int FROM agency_memberships WHERE agency_id = $1) AS memberships", [twinA.agencyId]);
+      assert.deepEqual(twinRows.rows[0], { agencies: 1, memberships: 1 }, 'one agency and one owner');
+      const rivals = await Promise.all([postAgency(tokens.accessToken, { tradeName: 'Rival One' }, 'cle-e2e-0003'), postAgency(tokens.accessToken, { tradeName: 'Rival Two' }, 'cle-e2e-0003')]);
+      assert.deepEqual(rivals.map(response => response.status).sort(), [201, 409], 'simultaneous creations with one key and two contents: one wins');
+      const rivalRows = await agencyPool.query("SELECT count(*)::int AS total FROM agencies WHERE trade_name IN ('Rival One', 'Rival Two')");
+      assert.equal(rivalRows.rows[0].total, 1);
+
+      await agencyPool.query("INSERT INTO agency_memberships (id, agency_id, user_id, role, active) VALUES ('00000000-0000-4000-8000-000000000040', $1, $2, 'admin', true), ('00000000-0000-4000-8000-000000000041', $1, $3, 'agent', true), ('00000000-0000-4000-8000-000000000042', $1, $4, 'agent', false)", [created.agencyId, '00000000-0000-4000-8000-000000000012', invitedUser, former]);
+      const fresh = { status: 'draft', submission: null, readyForSubmission: false, capabilities: [], hybrid: false, activeZones: 0, activeSites: 0, prerequisites: ['legal_name', 'headquarters_city', 'headquarters_address', 'primary_phone', 'active_capability', 'active_site'].map(code => ({ code, filled: false })) };
+      for (const [role, access] of [['owner', tokens.accessToken], ['admin', adminAccess], ['agent', invitedTokens.accessToken]]) {
+        const state = await getOnboarding(access, created.agencyId);
+        assert.equal(state.status, 200, `${role} reads the onboarding state`);
+        assert.match(state.headers.get('cache-control'), /no-store/);
+        assert.deepEqual(await state.json(), fresh, `${role} sees a fresh draft`);
+      }
+      const unknownState = await getOnboarding(tokens.accessToken, '00000000-0000-4000-8000-0000000000fe');
+      assert.equal(unknownState.status, 404);
+      const hidden = withoutEcho(await unknownState.json());
+      for (const [who, access, id] of [['an outsider', outsiderAccess, created.agencyId], ['a former member', formerAccess, created.agencyId], ['a member of another agency', tokens.accessToken, merchantAgency.agencyId]]) {
+        const response = await getOnboarding(access, id);
+        assert.equal(response.status, 404, `${who} finds nothing`);
+        assert.deepEqual(withoutEcho(await response.json()), hidden, `${who} gets the answer of an unknown agency`);
+      }
+      assert.equal((await getOnboarding(null, created.agencyId)).status, 401, 'anonymous read refused');
+      assert.equal((await getOnboarding(revokedAccess, created.agencyId)).status, 401, 'revoked session cannot read');
+      assert.equal((await getOnboarding(tokens.accessToken, 'not-a-uuid')).status, 400, 'invalid agency id');
+
+      await agencyPool.query("UPDATE agencies SET legal_name = 'Tchoua Express SARL', headquarters_city = 'Douala', primary_phone = '+237677123456' WHERE id = $1", [created.agencyId]);
+      const partial = await (await getOnboarding(invitedTokens.accessToken, created.agencyId)).text();
+      assert.deepEqual(JSON.parse(partial).prerequisites.filter(item => item.filled).map(item => item.code), ['legal_name', 'headquarters_city', 'primary_phone']);
+      assert.ok(!partial.includes('Tchoua Express SARL') && !partial.includes('+237677123456') && !partial.includes('Douala'), 'identity values never leave');
+      assert.equal(JSON.parse(partial).readyForSubmission, false);
+      await agencyPool.query("UPDATE agencies SET status = 'submitted', submitted_at = '2026-11-15T10:00:00Z', submitted_by = $2 WHERE id = $1", [created.agencyId, account.id]);
+      const submitted = await (await getOnboarding(tokens.accessToken, created.agencyId)).json();
+      assert.deepEqual([submitted.status, submitted.submission, submitted.readyForSubmission], ['submitted', { submittedAt: '2026-11-15T10:00:00.000Z', submittedBy: account.id }, false]);
     } finally { await agencyPool.end(); }
     const me = (token) => fetch('http://127.0.0.1:3107/api/v1/me', { headers: { authorization: `Bearer ${token}` } });
     const profile = await me(tokens.accessToken);
@@ -218,7 +305,7 @@ const { Client } = require('pg');
       assert.equal(audit.rows[0].total, 1);
       const actions = await auditPool.query('SELECT action, count(*)::int AS total FROM identity_audit GROUP BY action ORDER BY action');
       assert.deepEqual(Object.fromEntries(actions.rows.map(row => [row.action, row.total])), {
-        'invitation.accepted': 2, 'invitation.created': 4, 'membership.removed': 1, 'membership.role_changed': 1,
+        'agency.created': 6, 'invitation.accepted': 2, 'invitation.created': 4, 'membership.removed': 1, 'membership.role_changed': 1,
         'session.login': 2, 'session.logout': 1, 'session.refresh': 1, 'user.registered': 1,
       }, 'every successful change is audited exactly once');
       const acceptedAudit = await auditPool.query("SELECT user_id, agency_id, subject_user_id FROM identity_audit WHERE action = 'invitation.accepted' AND agency_id = $1", [httpAgency]);
@@ -240,7 +327,7 @@ const { Client } = require('pg');
     assert.ok(spec.paths['/api/v1/auth/logout']);
     assert.ok(spec.paths['/api/v1/me']);
     assert.deepEqual(Object.keys(spec.paths).sort(), [
-      '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agency-invitations/accept',
+      '/api/v1/agencies', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agency-invitations/accept',
       '/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/auth/refresh', '/api/v1/auth/register',
       '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies',
     ], 'public route set unchanged');

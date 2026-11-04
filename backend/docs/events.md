@@ -10,6 +10,7 @@ Le seul consommateur aujourd'hui est l'audit. `IdentityAuditSubscriber` et `Agen
 | `SessionOpened` | `Session.open` (connexion) | `userId`, `sessionId` | `session.login` · userId · — · — |
 | `SessionRefreshed` | `Session.rotate` | `userId`, `sessionId` | `session.refresh` · userId · — · — |
 | `SessionRevoked` | `Session.revoke` (déconnexion) | `userId`, `sessionId` | `session.logout` · userId · — · — |
+| `AgencyRegistered` | `Agency.draft` (création d'une agence) | `agencyId`, `actorId` | `agency.created` · actorId · agencyId · — |
 | `InvitationIssued` | `Invitation.issue` | `agencyId`, `actorId` | `invitation.created` · actorId · agencyId · — |
 | `InvitationAccepted` | `Invitation.accept` | `agencyId`, `userId` | `invitation.accepted` · userId · agencyId · userId |
 | `MembershipRoleChanged` | `AgencyTeam.changeRole` | `agencyId`, `actorId`, `subjectUserId` | `membership.role_changed` · actorId · agencyId · subjectUserId |
