@@ -1,6 +1,6 @@
-# Agences et onboarding — tranches 1 à 3 implémentées
+# Agences et onboarding — lot B2 implémenté
 
-Quinze routes sont disponibles : la création d'un brouillon (B2.1), l'état d'onboarding (B2.9), la lecture d'une agence, la complétion de l'identité (B2.2), la modification du profil (B2.6), les zones desservies (B2.3), les sites (B2.8) et l'activation et la suspension des capacités (B2.4, B2.7). La soumission arrive dans la tranche suivante du lot B2 ; ne pas supposer ses champs. Toutes les routes demandent `Authorization: Bearer <accessToken>` et répondent avec `Cache-Control: no-store`. Les erreurs utilisent Problem Details (voir [conventions](../conventions.md)).
+Dix-sept routes sont disponibles : la création d'un brouillon (B2.1), l'état d'onboarding (B2.9), la lecture d'une agence, la complétion de l'identité (B2.2), la modification du profil (B2.6), les zones desservies (B2.3), les sites (B2.8) et l'activation et la suspension des capacités (B2.4, B2.7). la soumission à vérification (B2.5) ; la liste des membres (B2.10) est décrite dans [Identité et accès](identite-acces.md). Toutes les routes demandent `Authorization: Bearer <accessToken>` et répondent avec `Cache-Control: no-store`. Les erreurs utilisent Problem Details (voir [conventions](../conventions.md)).
 
 ## Créer un brouillon d'agence
 
@@ -310,3 +310,39 @@ Configuration minimale (décision D-04) : **livraison** = au moins une zone acti
 | non-membre, ancien membre, autre agence, agence inconnue | 404 | 404 (même réponse) |
 
 L'agence visée vient du chemin, jamais du corps. Chaque action effective écrit une trace d'audit dans la même transaction (`agency.zone_added`, `agency.zone_reactivated`, `agency.zone_retired`, `agency.site_created`, `agency.site_updated`, `agency.site_deactivated`, `agency.site_reactivated`, `agency.capability_enabled`, `agency.capability_suspended`), avec des **noms** de champs ou de capacités seulement (`details.fields`), jamais de villes, d'adresses, de téléphones ni de motifs. Un refus (conflit, droit, donnée invalide) et une modification sans effet réel n'écrivent rien.
+
+## Soumettre l'agence à vérification
+
+`POST /api/v1/agencies/{agencyId}/submit` — **propriétaire seulement**, agence au statut `draft` seulement.
+
+Action sans corps : l'agence vient du chemin, la personne et la date viennent du serveur. Un corps non vide (par exemple `{ "status": "approved" }`) reçoit **400**. Il n'y a pas d'`If-Match` : la soumission ne modifie ni l'identité ni le profil et ne change pas la version de l'agence, la seule concurrence à tenir est « une seule soumission », assurée par le verrou de l'agence (et par un `UPDATE` conditionné au statut `draft`).
+
+Prérequis (source unique : `domain/onboarding-requirements.ts`, les mêmes que ceux de l'état d'onboarding) : raison sociale, ville et adresse du siège, téléphone principal, au moins une capacité **active** (une capacité suspendue ne compte pas), au moins un site actif. La configuration de chaque capacité active (livraison : une zone active ; stockage : un site actif) est revérifiée au moment de la soumission.
+
+Réponse **200** (`Cache-Control: no-store`) :
+
+```json
+{ "status": "submitted", "submission": { "submittedAt": "2026-11-15T09:00:00.000Z", "submittedBy": "uuid" } }
+```
+
+Pour le détail (prérequis, capacités), relire `GET /agencies/{agencyId}/onboarding`.
+
+| Statut | Cas |
+| --- | --- |
+| 200 | Agence soumise : statut `submitted`, date et auteur enregistrés, trace d'audit `agency.submitted`, événement `AgencySubmittedForVerification`. |
+| 400 | Corps non vide ; `agencyId` non UUID ; **dossier incomplet** : `code: "SUBMISSION_INCOMPLETE"` et `missing`, la liste **complète** des prérequis non remplis, parmi `legal_name`, `headquarters_city`, `headquarters_address`, `primary_phone`, `active_capability`, `active_site` (dans cet ordre), plus `active_zone` ou `active_site` si une capacité active a perdu sa configuration. Rien n'est écrit. |
+| 401 | Jeton absent, invalide ou session révoquée. |
+| 403 | Le membre actif est administrateur ou agent. |
+| 404 | Agence inconnue, autre agence, non-membre ou ancien membre (même réponse). |
+| 409 | `code: "AGENCY_ALREADY_SUBMITTED"` : l'agence est déjà soumise ; date, auteur et trace sont ceux de la première soumission. Deux soumissions simultanées : une seule réussit. |
+| 503 | Base ou migrations indisponibles. |
+
+Les droits sont vérifiés avant le statut : un administrateur reçoit 403 même sur une agence déjà soumise.
+
+Effets de la soumission :
+
+- l'**identité est verrouillée** (`PATCH …/identity` : 409) ;
+- le **profil**, les **zones**, les **sites** et les **capacités** restent modifiables, comme avant ;
+- il n'y a **aucun retrait de soumission** : l'approbation, le rejet et les statuts suivants relèvent du lot B10 ;
+- l'état d'onboarding montre `status: "submitted"`, `submission: { submittedAt, submittedBy }` et `readyForSubmission: false`. Aucun champ ne dit « vérifiée », « certifiée » ou « assurée » : l'agence est seulement soumise à vérification ;
+- aucune notification n'est envoyée.

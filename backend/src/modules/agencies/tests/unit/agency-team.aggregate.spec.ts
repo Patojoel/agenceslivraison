@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { UserId } from '@shared/domain/value-objects/user-id';
-import { AlreadyMember, MembershipForbidden, MembershipNotFound } from '../../domain/exceptions/agency.exceptions';
+import { AgencySubmissionForbidden, AlreadyMember, MembershipForbidden, MembershipNotFound } from '../../domain/exceptions/agency.exceptions';
 import { MembershipId } from '../../domain/value-objects/membership-id';
 import { at, uuid } from '@shared/tests/doubles/fakes';
 import { ADMIN, AGENCY, AGENT, membership, OWNER, team } from '../doubles/fakes';
@@ -86,4 +86,13 @@ test('admission refuses current and former members', () => {
   assert.throws(() => agency.admit(MembershipId.of(uuid(30)), user(AGENT), 'agent'), AlreadyMember);
   agency.admit(MembershipId.of(uuid(30)), user(ADMIN), 'admin');
   assert.deepEqual(agency.snapshot()[2], membership({ user: ADMIN.user, membership: uuid(30) }, 'admin'));
+});
+
+test('only an active owner may submit the agency: administrators and agents are forbidden, outsiders and former members see nothing', () => {
+  const people = team(membership(OWNER, 'owner'), membership(ADMIN, 'admin'), membership(AGENT, 'agent'), membership({ user: uuid(4), membership: uuid(24) }, 'owner', false));
+  people.authorizeAgencySubmission(UserId.of(OWNER.user));
+  assert.throws(() => people.authorizeAgencySubmission(UserId.of(ADMIN.user)), (error: unknown) => error instanceof AgencySubmissionForbidden);
+  assert.throws(() => people.authorizeAgencySubmission(UserId.of(AGENT.user)), (error: unknown) => error instanceof AgencySubmissionForbidden);
+  assert.throws(() => people.authorizeAgencySubmission(UserId.of(uuid(4))), MembershipNotFound);
+  assert.throws(() => people.authorizeAgencySubmission(UserId.of(uuid(5))), MembershipNotFound);
 });

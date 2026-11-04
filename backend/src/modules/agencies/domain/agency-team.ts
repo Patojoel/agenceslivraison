@@ -2,7 +2,7 @@ import { AggregateRoot } from '@shared/domain/aggregate-root';
 import { UserId } from '@shared/domain/value-objects/user-id';
 import { AgencyRole, InvitationRole } from './agency-role';
 import { AgencyEvent } from './events/agency-events';
-import { AgencyEditForbidden, AlreadyMember, LastOwner, MembershipForbidden, MembershipNotFound } from './exceptions/agency.exceptions';
+import { AgencyEditForbidden, AgencySubmissionForbidden, AlreadyMember, LastOwner, MembershipForbidden, MembershipNotFound } from './exceptions/agency.exceptions';
 import { AgencyId } from './value-objects/agency-id';
 import { MembershipId } from './value-objects/membership-id';
 
@@ -40,6 +40,11 @@ export class AgencyTeam extends AggregateRoot<AgencyEvent> {
   /** Identity and profile are managed by owners and administrators; an agent only reads. */
   authorizeAgencyEdition(actorId: UserId): void {
     if (this.activeMemberByUser(actorId).role === 'agent') throw new AgencyEditForbidden();
+  }
+
+  /** Only an owner submits the agency: a recipient of the other roles is told so, an outsider sees nothing. */
+  authorizeAgencySubmission(actorId: UserId): void {
+    if (this.activeMemberByUser(actorId).role !== 'owner') throw new AgencySubmissionForbidden();
   }
 
   changeRole(actorId: UserId, membershipId: MembershipId, role: AgencyRole): void {

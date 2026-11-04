@@ -1,6 +1,8 @@
 import { UserId } from '@shared/domain/value-objects/user-id';
 import { ReadAgencyRepository } from '../../application/ports/read-agency.repository';
 import { AgencyReadModel } from '../../application/read-models/agency.read-model';
+import { ActiveMembersCriteria, ReadAgencyMemberRepository } from '../../application/ports/read-agency-member.repository';
+import { AgencyMemberReadModel } from '../../application/read-models/agency-member.read-model';
 import { ReadAgencyOnboardingRepository } from '../../application/ports/read-agency-onboarding.repository';
 import { AgencyOnboardingReadModel } from '../../application/read-models/agency-onboarding.read-model';
 import { Agency } from '../../domain/agency';
@@ -40,7 +42,7 @@ export function team(...memberships: Membership[]): AgencyTeam {
 export function anAgency(status: AgencyStatus = 'draft', version = 1, id = AGENCY): Agency {
   return Agency.reconstitute({
     id: AgencyId.of(id), tradeName: TradeName.of('Express Douala'), description: null, identity: EMPTY_IDENTITY,
-    status, version, createdBy: UserId.of(OWNER.user), createdAt: T0, zones: [], sites: [], capabilityTransitions: [],
+    status, submission: status === 'submitted' ? { at: T0, by: UserId.of(OWNER.user) } : null, version, createdBy: UserId.of(OWNER.user), createdAt: T0, zones: [], sites: [], capabilityTransitions: [],
   });
 }
 
@@ -141,5 +143,31 @@ export class InMemoryInvitationRepository implements InvitationRepository {
 
   stored(id: string): InvitationSnapshot | undefined {
     return this.rows.get(id);
+  }
+}
+
+export interface MemberRow {
+  readonly agencyId: string;
+  readonly membershipId: string;
+  readonly userId: string;
+  readonly role: AgencyRole;
+  readonly active: boolean;
+}
+
+export class InMemoryReadAgencyMemberRepository implements ReadAgencyMemberRepository {
+  constructor(private readonly rows: readonly MemberRow[]) {}
+
+  async listActiveForMember(criteria: ActiveMembersCriteria): Promise<readonly AgencyMemberReadModel[]> {
+    const isMember = await this.isActiveMember(criteria.agencyId, criteria.userId);
+    if (!isMember) return [];
+    return this.rows
+      .filter(row => row.agencyId === criteria.agencyId && row.active && (criteria.after === null || row.membershipId > criteria.after))
+      .sort((a, b) => (a.membershipId < b.membershipId ? -1 : 1))
+      .slice(0, criteria.limit)
+      .map(({ membershipId, userId, role }) => ({ membershipId, userId, role }));
+  }
+
+  async isActiveMember(agencyId: string, userId: string): Promise<boolean> {
+    return this.rows.some(row => row.agencyId === agencyId && row.userId === userId && row.active);
   }
 }

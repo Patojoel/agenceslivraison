@@ -13,6 +13,7 @@ Le seul consommateur aujourd'hui est l'audit. `IdentityAuditSubscriber` et `Agen
 | `AgencyRegistered` | `Agency.draft` (création d'une agence) | `agencyId`, `actorId` | `agency.created` · actorId · agencyId · — |
 | `AgencyIdentityUpdated` | `Agency.completeIdentity` (seulement si un champ change réellement) | `agencyId`, `actorId`, `fields` (noms des champs modifiés, jamais leurs valeurs) | `agency.identity_updated` · actorId · agencyId · — · `details = { "fields": [...] }` |
 | `AgencyProfileUpdated` | `Agency.updateProfile` (seulement si un champ change réellement) | `agencyId`, `actorId`, `fields` (`tradeName`, `description`) | `agency.profile_updated` · actorId · agencyId · — · `details = { "fields": [...] }` |
+| `AgencySubmittedForVerification` | `Agency.submit` (une seule fois par agence) | `agencyId`, `actorId` | `agency.submitted` · actorId · agencyId · — (aucun `details`, aucune valeur de l'agence) |
 | `ServiceZoneAdded` | `Agency.addZone` | `agencyId`, `actorId`, `zoneId`, `reactivated` (vrai si une zone retirée revient) | `agency.zone_added` ou `agency.zone_reactivated` · actorId · agencyId · — |
 | `ServiceZoneRetired` | `Agency.retireZone` | `agencyId`, `actorId`, `zoneId` | `agency.zone_retired` · actorId · agencyId · — |
 | `AgencySiteCreated` | `Agency.createSite` | `agencyId`, `actorId`, `siteId` | `agency.site_created` · actorId · agencyId · — |

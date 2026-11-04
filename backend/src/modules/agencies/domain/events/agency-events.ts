@@ -13,6 +13,7 @@ export type AgencyEvent =
   | { readonly type: 'AgencySiteUpdated'; readonly agencyId: string; readonly actorId: string; readonly siteId: string; readonly fields: readonly SiteField[] }
   | { readonly type: 'AgencySiteDeactivated'; readonly agencyId: string; readonly actorId: string; readonly siteId: string }
   | { readonly type: 'AgencySiteReactivated'; readonly agencyId: string; readonly actorId: string; readonly siteId: string }
+  | { readonly type: 'AgencySubmittedForVerification'; readonly agencyId: string; readonly actorId: string }
   | { readonly type: 'AgencyCapabilityEnabled'; readonly agencyId: string; readonly actorId: string; readonly capability: CapabilityType }
   | { readonly type: 'AgencyCapabilitySuspended'; readonly agencyId: string; readonly actorId: string; readonly capability: CapabilityType }
   | { readonly type: 'InvitationIssued'; readonly agencyId: string; readonly actorId: string }
@@ -21,7 +22,7 @@ export type AgencyEvent =
   | { readonly type: 'MembershipRevoked'; readonly agencyId: string; readonly actorId: string; readonly subjectUserId: string };
 
 const TYPES: ReadonlySet<string> = new Set<AgencyEvent['type']>([
-  'AgencyRegistered', 'AgencyIdentityUpdated', 'AgencyProfileUpdated',
+  'AgencyRegistered', 'AgencyIdentityUpdated', 'AgencyProfileUpdated', 'AgencySubmittedForVerification',
   'ServiceZoneAdded', 'ServiceZoneRetired',
   'AgencySiteCreated', 'AgencySiteUpdated', 'AgencySiteDeactivated', 'AgencySiteReactivated',
   'AgencyCapabilityEnabled', 'AgencyCapabilitySuspended',

@@ -50,6 +50,22 @@ export class StaleAgencyVersion extends DomainException {
   constructor() { super('conflict', 'The agency was modified in the meantime'); }
 }
 
+/** Only an owner submits the agency; the other roles know the agency, so this is a refusal, not a "not found". */
+export class AgencySubmissionForbidden extends DomainException {
+  constructor() { super('forbidden', 'Only an owner may submit this agency'); }
+}
+
+export class AgencyAlreadySubmitted extends DomainException {
+  constructor() { super('conflict', 'This agency is already submitted for verification', { code: 'AGENCY_ALREADY_SUBMITTED' }); }
+}
+
+/** Lists every prerequisite that is not met, by code (see `onboarding-requirements`), and nothing else. */
+export class SubmissionIncomplete extends DomainException {
+  constructor(readonly missing: readonly string[]) {
+    super('invalid', 'The agency file is incomplete', { code: 'SUBMISSION_INCOMPLETE', missing });
+  }
+}
+
 export class AgencyEditForbidden extends DomainException {
   constructor() { super('forbidden', 'Not allowed to edit this agency'); }
 }

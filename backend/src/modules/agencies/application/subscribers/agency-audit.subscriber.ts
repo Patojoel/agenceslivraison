@@ -12,6 +12,8 @@ function toAuditEntry(event: AgencyEvent): AuditEntry {
       return { userId: event.actorId, action: 'agency.identity_updated', agencyId: event.agencyId, details: { fields: event.fields } };
     case 'AgencyProfileUpdated':
       return { userId: event.actorId, action: 'agency.profile_updated', agencyId: event.agencyId, details: { fields: event.fields } };
+    case 'AgencySubmittedForVerification':
+      return { userId: event.actorId, action: 'agency.submitted', agencyId: event.agencyId };
     case 'ServiceZoneAdded':
       return { userId: event.actorId, action: event.reactivated ? 'agency.zone_reactivated' : 'agency.zone_added', agencyId: event.agencyId };
     case 'ServiceZoneRetired':

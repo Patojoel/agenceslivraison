@@ -73,3 +73,10 @@ test('zone, site and capability events are audited by action, with names or type
     { userId, action: 'agency.capability_suspended', agencyId, details: { fields: ['storage'] } },
   ]);
 });
+
+test('the submission is audited with the actor and the agency, without any value of the agency', async () => {
+  const audit = new InMemoryAuditLog();
+  const event: AgencyEvent = { type: 'AgencySubmittedForVerification', agencyId: uuid(10), actorId: uuid(1) };
+  await new AgencyAuditSubscriber(audit).handle(event);
+  assert.deepEqual(audit.entries, [{ userId: uuid(1), action: 'agency.submitted', agencyId: uuid(10) }]);
+});

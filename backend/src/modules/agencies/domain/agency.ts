@@ -4,11 +4,12 @@ import { AgencySnapshot } from './agency.snapshot';
 import { changedFields, EMPTY_IDENTITY, IDENTITY_FIELDS, IdentityChange, PROFILE_FIELDS, ProfileChange, withFields } from './agency-identity';
 import { AgencySite, SITE_FIELDS, SiteChange, SiteDetails } from './agency-site';
 import { CAPABILITY_TYPES, CapabilityState, CapabilityTransition, CapabilityType, REQUIREMENT_OF } from './capability';
+import { evaluateOnboarding } from './onboarding-requirements';
 import { AgencyEvent } from './events/agency-events';
 import {
-  AgencyIdentityLocked, AgencySiteNotFound, CapabilityAlreadyActive, CapabilityNotActive, CapabilityPrerequisiteMissing, LastActiveSite, LastActiveZone,
+  AgencyAlreadySubmitted, AgencyIdentityLocked, AgencySiteNotFound, CapabilityAlreadyActive, CapabilityNotActive, CapabilityPrerequisiteMissing, LastActiveSite, LastActiveZone,
   ServiceZoneAlreadyRetired, ServiceZoneAlreadyServed, ServiceZoneLimitReached, ServiceZoneNotFound, SiteAlreadyActive, SiteDeactivated, SiteNameTaken,
-  StaleAgencyVersion, StaleSiteVersion,
+  StaleAgencyVersion, StaleSiteVersion, SubmissionIncomplete,
 } from './exceptions/agency.exceptions';
 import { MAX_ACTIVE_ZONES, ServiceZone } from './service-zone';
 import { AgencyId } from './value-objects/agency-id';
@@ -34,7 +35,7 @@ export class Agency extends AggregateRoot<AgencyEvent> {
   }
 
   static draft(details: NewAgency, now: Date): Agency {
-    const agency = new Agency({ ...details, description: null, identity: EMPTY_IDENTITY, status: 'draft', version: 1, createdAt: now, zones: [], sites: [], capabilityTransitions: [] });
+    const agency = new Agency({ ...details, description: null, identity: EMPTY_IDENTITY, status: 'draft', submission: null, version: 1, createdAt: now, zones: [], sites: [], capabilityTransitions: [] });
     agency.record({ type: 'AgencyRegistered', agencyId: details.id.value, actorId: details.createdBy.value });
     return agency;
   }
@@ -57,6 +58,18 @@ export class Agency extends AggregateRoot<AgencyEvent> {
     if (fields.length === 0) return;
     this.state = { ...this.state, identity: withFields(this.state.identity, change, fields), version: this.state.version + 1 };
     this.record({ type: 'AgencyIdentityUpdated', agencyId: this.state.id.value, actorId: actorId.value, fields });
+  }
+
+  /**
+   * The only status transition of the onboarding: draft to submitted, once. Version and identity are left as they are
+   * (the identity is locked from now on); every unmet prerequisite is reported at once.
+   */
+  submit(actorId: UserId, now: Date): void {
+    if (this.state.status !== 'draft') throw new AgencyAlreadySubmitted();
+    const missing = this.submissionGaps();
+    if (missing.length > 0) throw new SubmissionIncomplete(missing);
+    this.state = { ...this.state, status: 'submitted', submission: { at: now, by: actorId } };
+    this.record({ type: 'AgencySubmittedForVerification', agencyId: this.state.id.value, actorId: actorId.value });
   }
 
   /** Presentation: editable in every status, so a submitted agency can still keep it accurate. */
@@ -166,6 +179,22 @@ export class Agency extends AggregateRoot<AgencyEvent> {
   /** A suspended capability takes no new request; requests already accepted are not its concern. */
   acceptsNewRequests(type: CapabilityType): boolean {
     return this.isCapabilityActive(type);
+  }
+
+  /** The prerequisites of the onboarding state, then the configuration each active capability needs, checked again. */
+  private submissionGaps(): readonly string[] {
+    const { identity } = this.state;
+    const { prerequisites } = evaluateOnboarding({
+      status: this.state.status,
+      identity: { legalName: identity.legalName !== null, headquartersCity: identity.headquartersCity !== null, headquartersAddress: identity.headquartersAddress !== null, primaryPhone: identity.primaryPhone !== null },
+      activeCapabilities: CAPABILITY_TYPES.filter(type => this.isCapabilityActive(type)).length,
+      activeSites: this.activeSites().length,
+    });
+    const gaps: string[] = prerequisites.filter(item => !item.filled).map(item => item.code);
+    for (const type of CAPABILITY_TYPES.filter(item => this.isCapabilityActive(item))) {
+      for (const requirement of this.missingFor(type)) if (!gaps.includes(requirement)) gaps.push(requirement);
+    }
+    return gaps;
   }
 
   private assertVersion(expected: number): void {

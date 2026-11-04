@@ -810,6 +810,152 @@ const { Client } = require('pg');
         assert.ok(!(storage.rows[0].kind === 'activated' && storage.rows[0].sites === 0), `round ${round}: storage is never active without a site`);
       }
 
+      // B2.5: submission to verification, and B2.10: the members of an agency.
+      const submit = (agency, access, body, headers) => act('POST', `${agency}/submit`, access, body, headers);
+      const FULL_IDENTITY = { legalName: 'Express Douala SARL', headquartersCity: 'Douala', headquartersAddress: 'Rue Joss, Akwa', primaryPhone: '677123456' };
+      const PREREQUISITES = ['legal_name', 'headquarters_city', 'headquarters_address', 'primary_phone', 'active_capability', 'active_site'];
+      const FIELD_OF = { legal_name: 'legalName', headquarters_city: 'headquartersCity', headquarters_address: 'headquartersAddress', primary_phone: 'primaryPhone' };
+      const versionOf = async (agency) => String((await (await getAgency(ownerAccess, agency)).json()).version);
+      const stateOf = async (agency) => (await getOnboarding(ownerAccess, agency)).json();
+      const submissionRow = async (agency) => (await agencyPool.query('SELECT status, submitted_at, submitted_by, version, legal_name FROM agencies WHERE id = $1', [agency])).rows[0];
+      const submissionAudit = async (agency) => (await agencyPool.query("SELECT user_id, details FROM identity_audit WHERE agency_id = $1 AND action = 'agency.submitted'", [agency])).rows;
+      /** A draft built through the real routes; `without` leaves out one prerequisite. */
+      const prepared = async (without = null) => {
+        const agency = await configAgency();
+        const identity = Object.fromEntries(Object.entries(FULL_IDENTITY).filter(([field]) => field !== FIELD_OF[without]));
+        if (Object.keys(identity).length > 0) assert.equal((await patchAgency(`${agency}/identity`, ownerAccess, identity, await versionOf(agency))).status, 200, 'identity of the prepared agency');
+        if (without !== 'active_capability') {
+          assert.equal((await addZone(agency, ownerAccess, { city: 'Douala', district: 'Akwa' })).status, 201);
+          assert.equal((await enable(agency, 'delivery', ownerAccess)).status, 200);
+        }
+        if (without !== 'active_site') assert.equal((await createSite(agency, ownerAccess, { name: 'Agence Akwa', city: 'Douala', address: 'Rue Joss, Akwa' })).status, 201);
+        return agency;
+      };
+      let submissions = 0;
+
+      const complete = await prepared();
+      activeOne = complete;
+      assert.equal((await stateOf(complete)).readyForSubmission, true, 'the prepared agency is ready');
+      await assertHidden('submit', 'POST', agency => `${agency}/submit`);
+      for (const [who, access] of [['an administrator', adminAccess], ['an agent', agentAccess]]) {
+        await problemOf(await submit(complete, access), 403, undefined, `${who} cannot submit`);
+      }
+      for (const body of [{ status: 'approved' }, { agencyId: unknownAgency }, { submittedBy: adminUser }, { reason: 'x' }]) assert.equal((await submit(complete, ownerAccess, body)).status, 400, `a body is refused: ${JSON.stringify(body)}`);
+      assert.deepEqual([(await submissionRow(complete)).status, (await submissionAudit(complete)).length], ['draft', 0], 'refusals changed nothing');
+
+      // Incomplete dossiers: the refusal lists everything that is missing.
+      const empty = await configAgency();
+      const refusal = await problemOf(await submit(empty, ownerAccess), 400, 'SUBMISSION_INCOMPLETE', 'an empty draft cannot be submitted');
+      assert.deepEqual(refusal.missing, PREREQUISITES, 'every prerequisite is listed, in the order of the onboarding state');
+      for (const lacking of PREREQUISITES) {
+        const agency = await prepared(lacking);
+        const before = await versionOf(agency);
+        assert.deepEqual((await problemOf(await submit(agency, ownerAccess), 400, 'SUBMISSION_INCOMPLETE', `without ${lacking}`)).missing, [lacking], `only ${lacking} is listed`);
+        assert.deepEqual([(await submissionRow(agency)).status, (await submissionAudit(agency)).length, await versionOf(agency)], ['draft', 0, before], `without ${lacking}: still a draft, no trace`);
+      }
+      const suspendedOnly = await prepared();
+      assert.equal((await suspend(suspendedOnly, 'delivery', ownerAccess)).status, 200);
+      assert.deepEqual((await problemOf(await submit(suspendedOnly, ownerAccess), 400, 'SUBMISSION_INCOMPLETE', 'a suspended capability does not count')).missing, ['active_capability']);
+      const twoMissing = await prepared('primary_phone');
+      const siteOfTwo = (await agencyPool.query('SELECT id FROM agency_sites WHERE agency_id = $1', [twoMissing])).rows[0].id;
+      assert.equal((await siteAction(twoMissing, siteOfTwo, 'deactivate', ownerAccess)).status, 200);
+      assert.deepEqual((await problemOf(await submit(twoMissing, ownerAccess), 400, 'SUBMISSION_INCOMPLETE', 'two missing')).missing, ['primary_phone', 'active_site'], 'several missing prerequisites at once');
+
+      // Nominal submission.
+      const versionBefore = await versionOf(complete);
+      const first = await submit(complete, ownerAccess);
+      assert.equal(first.status, 200, 'the owner submits a complete agency');
+      assert.match(first.headers.get('cache-control'), /no-store/);
+      submissions += 1;
+      const submittedBody = await first.json();
+      assert.deepEqual({ ...submittedBody, submission: { ...submittedBody.submission, submittedAt: undefined } }, { status: 'submitted', submission: { submittedAt: undefined, submittedBy: account.id } });
+      assert.ok(Number.isFinite(Date.parse(submittedBody.submission.submittedAt)));
+      const stored = await submissionRow(complete);
+      assert.deepEqual([stored.status, stored.submitted_by, stored.submitted_at.toISOString()], ['submitted', account.id, submittedBody.submission.submittedAt], 'date and author are stored');
+      assert.equal(await versionOf(complete), versionBefore, 'the version of the agency does not move');
+      const submittedState = await stateOf(complete);
+      assert.deepEqual([submittedState.status, submittedState.submission, submittedState.readyForSubmission], ['submitted', submittedBody.submission, false], 'the onboarding state shows the submission');
+      assert.equal(/verified|certified|insured|approved/i.test(JSON.stringify(submittedState)), false, 'a submitted agency is not presented as verified');
+      assert.equal((await (await getAgency(ownerAccess, complete)).json()).status, 'submitted');
+      assert.deepEqual(await submissionAudit(complete), [{ user_id: account.id, details: null }], 'one audit row, no value of the agency');
+
+      // A second submission is a conflict, with no second effect; the rights are checked first.
+      await problemOf(await submit(complete, ownerAccess), 409, 'AGENCY_ALREADY_SUBMITTED', 'a second submission');
+      await problemOf(await submit(complete, adminAccess), 403, undefined, 'an administrator is refused before the status is looked at');
+      const afterSecond = await submissionRow(complete);
+      assert.deepEqual([afterSecond.submitted_at.toISOString(), afterSecond.submitted_by, (await submissionAudit(complete)).length], [stored.submitted_at.toISOString(), account.id, 1], 'date, author and trace are those of the first submission');
+
+      // Once submitted: identity locked through the real route, everything else still editable.
+      const lockedIdentity = await patchAgency(`${complete}/identity`, ownerAccess, { legalName: 'Autre raison sociale' }, await versionOf(complete));
+      assert.equal(lockedIdentity.status, 409, 'the identity of a submitted agency is locked');
+      assert.equal((await submissionRow(complete)).legal_name, FULL_IDENTITY.legalName, 'the locked identity is untouched');
+      assert.equal((await patchAgency(`${complete}/profile`, adminAccess, { description: 'Livraison et stockage à Douala' }, await versionOf(complete))).status, 200, 'the profile stays editable');
+      assert.equal((await addZone(complete, adminAccess, { city: 'Yaoundé', district: null })).status, 201, 'zones stay editable');
+      assert.equal((await createSite(complete, adminAccess, { name: 'Dépôt Bonabéri', city: 'Douala', address: 'Zone industrielle de Bonabéri' })).status, 201, 'sites stay editable');
+      assert.equal((await enable(complete, 'storage', adminAccess)).status, 200, 'capabilities stay editable');
+      assert.equal((await suspend(complete, 'delivery', adminAccess)).status, 200, 'and suspendable');
+      assert.deepEqual([(await stateOf(complete)).status, (await submissionRow(complete)).status], ['submitted', 'submitted'], 'nothing moves the status back');
+
+      // Concurrency: the lock on the agency makes one of two simultaneous submissions win.
+      for (let round = 0; round < 3; round++) {
+        const raced = await prepared();
+        const twins = await Promise.all([submit(raced, ownerAccess), submit(raced, ownerAccess)]);
+        assert.deepEqual(twins.map(response => response.status).sort(), [200, 409], `round ${round}: one submission wins`);
+        submissions += 1;
+        assert.equal((await submissionAudit(raced)).length, 1, `round ${round}: one audit row`);
+      }
+      for (let round = 0; round < 3; round++) {
+        const raced = await prepared();
+        const [submitted, edited] = await Promise.all([submit(raced, ownerAccess), patchAgency(`${raced}/identity`, adminAccess, { legalName: 'Nom concurrent' }, await versionOf(raced))]);
+        assert.equal(submitted.status, 200, `round ${round}: the submission of a complete agency succeeds`);
+        submissions += 1;
+        assert.ok([200, 409].includes(edited.status), `round ${round}: the identity edit is either before the submission or refused: ${edited.status}`);
+        const row = await submissionRow(raced);
+        assert.equal(row.legal_name, edited.status === 200 ? 'Nom concurrent' : FULL_IDENTITY.legalName, `round ${round}: the identity is what the winner of the lock left`);
+        assert.equal(row.status, 'submitted');
+      }
+      assert.equal((await agencyPool.query("SELECT count(*)::int AS total FROM identity_audit WHERE action = 'agency.submitted'")).rows[0].total, submissions, 'one audit row per successful submission, none for refusals');
+      assert.equal(JSON.stringify((await agencyPool.query("SELECT * FROM identity_audit WHERE action = 'agency.submitted'")).rows).includes('Douala'), false, 'the submission audit holds no value of the agency');
+
+      // The members of an agency.
+      const teamAgency = await configAgency();
+      activeOne = teamAgency;
+      const listMembers = (agency, access, query = '') => fetch(`${api}/agencies/${agency}/members${query}`, { headers: authHeaders(access) });
+      const activeMembers = (await agencyPool.query('SELECT id, user_id, role FROM agency_memberships WHERE agency_id = $1 AND active ORDER BY id', [teamAgency])).rows;
+      const expectedMembers = activeMembers.map(row => ({ membershipId: row.id, userId: row.user_id, role: row.role }));
+      assert.equal(expectedMembers.length, 3);
+      for (const [who, access] of [['the owner', ownerAccess], ['an administrator', adminAccess], ['an agent', agentAccess]]) {
+        const response = await listMembers(teamAgency, access);
+        assert.equal(response.status, 200, `${who} lists the members`);
+        assert.match(response.headers.get('cache-control'), /no-store/);
+        assert.deepEqual(await response.json(), { items: expectedMembers, nextCursor: null, hasMore: false }, `${who} sees the active members, with the identifiers and the role only`);
+      }
+      await assertHidden('list members', 'GET', agency => `${agency}/members`);
+      const collected = [];
+      let cursor = null;
+      for (let page = 0; page < 3; page++) {
+        const response = await listMembers(teamAgency, ownerAccess, `?limit=1${cursor ? `&cursor=${cursor}` : ''}`);
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        assert.equal(body.items.length, 1, `page ${page}`);
+        assert.equal(body.hasMore, page < 2, `page ${page}: hasMore`);
+        assert.equal(body.nextCursor, page < 2 ? body.items[0].membershipId : null, `page ${page}: the cursor is the last membership`);
+        collected.push(...body.items);
+        cursor = body.nextCursor;
+      }
+      assert.deepEqual(collected, expectedMembers, 'the pages cover the members once each, in order');
+      const twoPerPage = await (await listMembers(teamAgency, ownerAccess, '?limit=2')).json();
+      assert.deepEqual([twoPerPage.items.length, twoPerPage.hasMore], [2, true]);
+      for (const query of ['?limit=0', '?limit=101', '?limit=abc', '?limit=1.5', '?cursor=not-a-uuid']) assert.equal((await listMembers(teamAgency, ownerAccess, query)).status, 400, `invalid query ${query}`);
+      const beyond = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+      assert.deepEqual(await (await listMembers(teamAgency, ownerAccess, `?cursor=${beyond}`)).json(), { items: [], nextCursor: null, hasMore: false }, 'a member reading past the last row gets an empty page');
+      for (const [who, access] of [['an outsider', outsiderAccess], ['a former member', formerAccess]]) assert.equal((await listMembers(teamAgency, access, `?cursor=${beyond}`)).status, 404, `${who} finds nothing, cursor or not`);
+      await agencyPool.query('UPDATE agency_memberships SET active = false WHERE id = $1', [activeMembers.find(row => row.user_id === invitedUser).id]);
+      assert.equal((await listMembers(teamAgency, agentAccess)).status, 404, 'a member who lost access cannot list');
+      const remaining = await (await listMembers(teamAgency, ownerAccess)).json();
+      assert.deepEqual(remaining.items.map(item => item.userId).sort(), [account.id, adminUser].sort(), 'a former member is no longer listed');
+      assert.ok(!JSON.stringify(remaining).includes('@'), 'no e-mail address is exposed');
+
       // Audit: one row per effective action, names and types only.
       const trail = await configAudit(capsAgency);
       assert.deepEqual(trail.filter(entry => entry.action === 'agency.capability_enabled' || entry.action === 'agency.capability_suspended').slice(0, 3).map(entry => [entry.action, entry.user_id, entry.details]), [
@@ -852,8 +998,8 @@ const { Client } = require('pg');
     try {
       const audit = await auditPool.query("SELECT count(*)::int AS total FROM identity_audit WHERE user_id = $1 AND action = 'session.login'", [account.id]);
       assert.equal(audit.rows[0].total, 1);
-      // The configuration actions (zones, sites, capabilities) are counted against their own agencies above.
-      const actions = await auditPool.query("SELECT action, count(*)::int AS total FROM identity_audit WHERE action !~ '^agency\\.(zone|site|capability)_' GROUP BY action ORDER BY action");
+      // The actions on the configuration agencies (zones, sites, capabilities, submissions, edits made to prepare them) are counted against them above.
+      const actions = await auditPool.query("SELECT action, count(*)::int AS total FROM identity_audit WHERE action !~ '^agency\\.(zone|site|capability)_|^agency\\.submitted$' AND (agency_id IS NULL OR agency_id NOT IN (SELECT id FROM agencies WHERE trade_name = 'Configuration Express')) GROUP BY action ORDER BY action");
       const { 'agency.identity_updated': identityEdits, 'agency.profile_updated': profileEdits, ...otherActions } = Object.fromEntries(actions.rows.map(row => [row.action, row.total]));
       assert.equal(identityEdits + profileEdits, 13, 'one audit row per effective identity or profile edit');
       assert.ok(identityEdits === 5 || identityEdits === 6, 'the identity and profile edits racing on one version: either one may have won');
@@ -880,7 +1026,7 @@ const { Client } = require('pg');
     assert.ok(spec.paths['/api/v1/auth/logout']);
     assert.ok(spec.paths['/api/v1/me']);
     assert.deepEqual(Object.keys(spec.paths).sort(), [
-      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
+      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/submit', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
       '/api/v1/agency-invitations/accept',
       '/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/auth/refresh', '/api/v1/auth/register',
       '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies',

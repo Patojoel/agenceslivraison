@@ -43,6 +43,7 @@ Toutes ces routes demandent `Authorization: Bearer <accessToken>`. Un membre ext
 - `GET /api/v1/me/agencies?limit=20&cursor=<agencyId>` liste uniquement les agences actives du compte. Réponse : `{ "items": [{ "agencyId": "uuid", "role": "owner" }], "nextCursor": null, "hasMore": false }`. `limit` est compris entre 1 et 100 ; le curseur est l'`agencyId` reçu dans `nextCursor`.
 - `POST /api/v1/agencies/{agencyId}/invitations` accepte `{ "email": "personne@example.com", "role": "agent" }`, avec `role` égal à `agent` ou `admin`. Réponse **201** : `{ "token": "...", "expiresAt": "date ISO 8601" }`. Le jeton est valable sept jours et n'est retourné qu'à la création. Le transmettre confidentiellement à la personne invitée ; aucun e-mail n'est envoyé automatiquement.
 - `POST /api/v1/agency-invitations/accept` prend `{ "token": "..." }` et renvoie **200** avec `{ "agencyId": "uuid", "role": "agent" }`. Le compte connecté doit posséder l'adresse invitée ; un jeton invalide, expiré ou déjà utilisé renvoie **404**. Une personne déjà membre reçoit **409**.
+- `GET /api/v1/agencies/{agencyId}/members?limit=20&cursor=<membershipId>` liste les **membres actifs** de l'agence, triés par identifiant de membership, pour tout membre actif (propriétaire, administrateur ou agent). Réponse **200** : `{ "items": [{ "membershipId": "uuid", "userId": "uuid", "role": "owner" }], "nextCursor": null, "hasMore": false }`. `limit` de 1 à 100 (20 par défaut), `cursor` est le `nextCursor` précédent (UUID, sinon **400**). Un ancien membre n'apparaît pas et ne peut pas lire ; un non-membre, un ancien membre, une autre agence et une agence inconnue reçoivent le même **404**. Un membre qui lit au-delà de la dernière ligne reçoit une page vide. L'adresse e-mail n'est **pas** exposée (donnée personnelle, et le module des agences ne lit pas la table des comptes) : voir la décision ouverte D-18 pour l'écran d'équipe. `memberId` des routes suivantes est le `membershipId` de cette liste.
 - `PATCH /api/v1/agencies/{agencyId}/members/{memberId}` prend `{ "role": "admin" }` (`owner`, `admin`, `agent`) et renvoie **200** avec `{ "success": true }`. `memberId` est l'identifiant du membership, pas l'identifiant utilisateur.
 - `DELETE /api/v1/agencies/{agencyId}/members/{memberId}` désactive le membership et renvoie **200** avec `{ "success": true }`. Aucun membre ne peut modifier ou supprimer son propre accès avec ces routes ; la suppression du dernier propriétaire renvoie **409**.
 
@@ -60,6 +61,7 @@ Les chemins suivants restent indicatifs ; les routes décrites ci-dessus sont di
 | POST | `/api/v1/auth/logout` | Révoquer une session — implémenté |
 | GET | `/api/v1/me` | Consulter son profil — implémenté |
 | POST | `/api/v1/agencies/{id}/invitations` | Inviter un membre — implémenté |
+| GET | `/api/v1/agencies/{id}/members` | Lister les membres actifs — implémenté |
 | PATCH | `/api/v1/agencies/{id}/members/{memberId}` | Modifier le rôle d'un membre |
 | DELETE | `/api/v1/agencies/{id}/members/{memberId}` | Retirer un accès — implémenté |
 

@@ -14,12 +14,20 @@ export function isAgencyStatus(value: string): value is AgencyStatus {
   return AGENCY_STATUSES.some(status => status === value);
 }
 
+/** When and by whom the agency was submitted to verification. */
+export interface AgencySubmission {
+  readonly at: Date;
+  readonly by: UserId;
+}
+
 export interface AgencySnapshot {
   readonly id: AgencyId;
   readonly tradeName: TradeName;
   readonly description: Description | null;
   readonly identity: AgencyIdentity;
   readonly status: AgencyStatus;
+  /** Set together with the `submitted` status, never before. */
+  readonly submission: AgencySubmission | null;
   /** Moves with the identity and the profile only; zones, sites and capabilities have their own rules. */
   readonly version: number;
   readonly createdBy: UserId;

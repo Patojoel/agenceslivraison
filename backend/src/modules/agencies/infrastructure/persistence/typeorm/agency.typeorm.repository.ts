@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { TypeOrmDatabaseConnection } from '@shared/infrastructure/persistence/typeorm/typeorm-database-connection';
 import { Agency } from '../../../domain/agency';
 import { AgencySnapshot } from '../../../domain/agency.snapshot';
-import { StaleAgencyVersion, StaleSiteVersion } from '../../../domain/exceptions/agency.exceptions';
+import { AgencyAlreadySubmitted, StaleAgencyVersion, StaleSiteVersion } from '../../../domain/exceptions/agency.exceptions';
 import { AgencyRepository } from '../../../domain/ports/agency.repository';
 import { AgencyId } from '../../../domain/value-objects/agency-id';
 import { AgencyCapabilityTransitionOrmEntity } from './agency-capability-transition.orm-entity';
@@ -50,6 +50,11 @@ export class AgencyTypeOrmRepository implements AgencyRepository {
     if (!before || before.version !== now.version) {
       const result = await manager.update(AgencyOrmEntity, { id: now.id.value, version: now.version - 1 }, AgencyMapper.changes(agency));
       if (result.affected !== 1) throw new StaleAgencyVersion();
+    }
+    if (before && before.status !== now.status) {
+      // Only a draft becomes submitted: a concurrent submission that got there first leaves no row to update.
+      const result = await manager.update(AgencyOrmEntity, { id: now.id.value, status: before.status }, AgencyMapper.submission(agency));
+      if (result.affected !== 1) throw new AgencyAlreadySubmitted();
     }
     const agencyId = now.id.value;
     const zonesBefore = new Map((before?.zones ?? []).map(zone => [zone.id.value, zone]));

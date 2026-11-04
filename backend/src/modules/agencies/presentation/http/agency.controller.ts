@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Patch, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Param, Patch, Post, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
@@ -14,6 +14,9 @@ import { uuidSchema, ZodValidationPipe } from '@shared/presentation/pipes/zod-va
 import { CreateAgencyCommand } from '../../application/commands/create-agency/create-agency.command';
 import { CreateAgencyHandler } from '../../application/commands/create-agency/create-agency.handler';
 import { CreateAgencyResponse } from '../../application/commands/create-agency/create-agency.response';
+import { SubmitAgencyCommand } from '../../application/commands/submit-agency/submit-agency.command';
+import { SubmitAgencyHandler } from '../../application/commands/submit-agency/submit-agency.handler';
+import { SubmitAgencyResponse } from '../../application/commands/submit-agency/submit-agency.response';
 import { UpdateAgencyIdentityCommand } from '../../application/commands/update-agency-identity/update-agency-identity.command';
 import { UpdateAgencyIdentityHandler } from '../../application/commands/update-agency-identity/update-agency-identity.handler';
 import { UpdateAgencyIdentityResponse } from '../../application/commands/update-agency-identity/update-agency-identity.response';
@@ -25,6 +28,7 @@ import { GetAgencyResponse } from '../../application/queries/get-agency/get-agen
 import { GetAgencyOnboardingHandler } from '../../application/queries/get-agency-onboarding/get-agency-onboarding.handler';
 import { GetAgencyOnboardingResponse } from '../../application/queries/get-agency-onboarding/get-agency-onboarding.response';
 import { createAgencyRequest } from './dto/create-agency.request';
+import { noBody } from './dto/suspend-capability.request';
 import { updateAgencyIdentityRequest } from './dto/update-agency-identity.request';
 import { updateAgencyProfileRequest } from './dto/update-agency-profile.request';
 
@@ -63,11 +67,13 @@ export class AgencyController {
   private readonly createAgency: CommandHandler<CreateAgencyCommand, CreateAgencyResponse>;
   private readonly updateIdentity: CommandHandler<UpdateAgencyIdentityCommand, UpdateAgencyIdentityResponse>;
   private readonly updateProfile: CommandHandler<UpdateAgencyProfileCommand, UpdateAgencyProfileResponse>;
+  private readonly submitAgency: CommandHandler<SubmitAgencyCommand, SubmitAgencyResponse>;
 
   constructor(
     create: CreateAgencyHandler,
     identity: UpdateAgencyIdentityHandler,
     profile: UpdateAgencyProfileHandler,
+    submit: SubmitAgencyHandler,
     private readonly getOnboarding: GetAgencyOnboardingHandler,
     private readonly getAgency: GetAgencyHandler,
     transactional: TransactionalCommandHandlerFactory,
@@ -75,6 +81,7 @@ export class AgencyController {
     this.createAgency = transactional.create(create);
     this.updateIdentity = transactional.create(identity);
     this.updateProfile = transactional.create(profile);
+    this.submitAgency = transactional.create(submit);
   }
 
   @Post()
@@ -139,6 +146,20 @@ export class AgencyController {
     const result = await this.updateProfile.handle({ actorId: user.id, agencyId, expectedVersion, changes: body });
     response.setHeader('ETag', etagOf(result.version));
     return result;
+  }
+
+  @Post(':agencyId/submit')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({ summary: 'Soumet l’agence à vérification (propriétaire seulement, brouillon seulement, sans corps). Dossier incomplet : 400 SUBMISSION_INCOMPLETE, `missing` liste tout ce qui manque. Déjà soumise : 409 AGENCY_ALREADY_SUBMITTED. L’identité est verrouillée ensuite.' })
+  @ApiOkResponse({ schema: { type: 'object', required: ['status', 'submission'], properties: { status: { type: 'string', enum: ['submitted'] }, submission: { type: 'object', required: ['submittedAt', 'submittedBy'], properties: { submittedAt: { type: 'string', format: 'date-time' }, submittedBy: { type: 'string', format: 'uuid' } } } } } })
+  submit(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('agencyId', new ZodValidationPipe(uuidSchema)) agencyId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the pipe is the point: it refuses any body
+    @Body(new ZodValidationPipe(noBody)) _body: z.output<typeof noBody>,
+  ): Promise<SubmitAgencyResponse> {
+    return this.submitAgency.handle({ actorId: user.id, agencyId });
   }
 
   @Get(':agencyId/onboarding')

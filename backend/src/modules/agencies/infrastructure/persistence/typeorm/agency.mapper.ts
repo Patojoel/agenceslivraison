@@ -52,6 +52,12 @@ export class AgencyMapper {
     };
   }
 
+  /** The columns of the submission, written together with the status. */
+  static submission(agency: Agency): Partial<AgencyOrmEntity> {
+    const { status, submission } = agency.snapshot();
+    return { status, submittedAt: submission?.at ?? null, submittedBy: submission?.by.value ?? null };
+  }
+
   /** The rows of the zones, sites and capability transitions are those of the same agency, in the order of the transitions. */
   static toDomain(row: AgencyOrmEntity, configuration: { readonly zones: readonly ServiceZoneOrmEntity[]; readonly sites: readonly AgencySiteOrmEntity[]; readonly transitions: readonly AgencyCapabilityTransitionOrmEntity[] }): Agency {
     if (!isAgencyStatus(row.status)) throw new Error('Unknown agency status in database');
@@ -69,6 +75,7 @@ export class AgencyMapper {
         niu: ofOptional(row.niu, Niu.of),
       },
       status: row.status,
+      submission: row.submittedAt && row.submittedBy ? { at: row.submittedAt, by: UserId.of(row.submittedBy) } : null,
       version: row.version,
       createdBy: UserId.of(row.createdBy),
       createdAt: row.createdAt,
