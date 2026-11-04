@@ -18,10 +18,10 @@ Tableau de bord vivant du projet. Le détail de chaque tâche (règles, endpoint
 
 | Élément | Valeur |
 |---|---|
-| Lot backend courant | B2 — Onboarding agence (S1 en cours) |
+| Lot backend courant | B2 — Onboarding agence (S1 rédigée, en attente de D-04, D-13, D-14, D-15) |
 | Branche | `refactor/architecture-normalisee` |
 | Mode de session | light (session du 2026-11-03) |
-| Tâches en cours | `[~]` B2.S1 — use cases de l'onboarding (`use-case-writer`) |
+| Tâches en cours | `[~]` B2.S1 — use cases rédigés ([docs/use-cases/](docs/use-cases/README.md)), hypothèses à valider par le user avant S2 |
 
 ### Refactor architecture + TypeORM — commité (2026-11-03)
 Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranchée en faveur de TypeORM et de l'architecture normalisée. `CLAUDE.md`, les agents (`back-builder`, `archi-reviewer`, `query-perf`), `phases.md` et `backend/docs/` sont alignés. Décision et conventions : [docs/architecture/](docs/architecture/).
@@ -34,7 +34,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 |---|---|---|---|
 | B0 | Socle technique | terminé (sauvegarde à valider en cible) | 11/12 |
 | B1 | Identité, sessions, memberships | terminé, re-vérifié après refactor (rate limit partagé et constats de revue B1.13–B1.14 à traiter) | 11/14 |
-| B2 | Onboarding agence | à faire | 0/9 |
+| B2 | Onboarding agence | S1 rédigée, décisions D-04, D-13 à D-15 attendues | 0/10 |
 | B3 | Tarifs, zones, marketplace publique | à faire | 0/13 |
 | B4 | Clients, commerçants, demandes | à faire | 0/14 |
 | B5 | Commandes, colis, suivi | à faire | 0/17 |
@@ -93,7 +93,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 > État B0/B1 relevé dans `backend/docs/` et le code au 2026-11-03, puis re-vérifié après le refactor `293a35b` : tous les parcours B1 sont couverts par `test/e2e.cjs`, passé dans Docker le 2026-11-03.
 
 ### B2 — Onboarding agence (CRITIQUE)
-Étapes : [~] S1 use cases · [ ] S2 plan validé · [ ] S3 domaine · [ ] S4 application · [ ] S5 persistance · [ ] S6 HTTP · [ ] S7 E2E · [ ] S8 docs · [ ] S9 revues · [ ] S10 clôture
+Étapes : [~] S1 use cases (9 UC, 111 scénarios, 112 tests prévus ; hypothèses à valider) · [ ] S2 plan validé · [ ] S3 domaine · [ ] S4 application · [ ] S5 persistance · [ ] S6 HTTP · [ ] S7 E2E · [ ] S8 docs · [ ] S9 revues · [ ] S10 clôture
 - [ ] B2.1 Créer brouillon + premier propriétaire
 - [ ] B2.2 Compléter l'identité
 - [ ] B2.3 Zones desservies
@@ -103,6 +103,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [ ] B2.7 Suspendre une capacité
 - [ ] B2.8 Gérer les sites
 - [ ] B2.9 État d'onboarding
+- [ ] B2.10 *(ajoutée le 2026-11-04, anomalie A-09)* Lister les membres d'une agence — nécessaire à F1.3 ; rattachement B2 à confirmer
 
 ### B3 — Tarifs, zones, marketplace publique (CRITIQUE)
 Étapes : [ ] S1 · [ ] S2 · [ ] S3 · [ ] S4 · [ ] S5 · [ ] S6 · [ ] S7 · [ ] S8 · [ ] S9 · [ ] S10
@@ -339,7 +340,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 |---|---|---|---|
 | D-02 | Stockage des jetons côté web : BFF avec cookie `HttpOnly` ou cookie posé par l'API + CSRF | F0.4, F1.1, F2.2 | ouverte |
 | D-03 | Mobile : deux applications ou une seule avec deux profils | M0.1 | ouverte (recommandé : deux) |
-| D-04 | Champs et documents de l'identité d'agence, configuration minimale des capacités, statuts après soumission | B2 | ouverte |
+| D-04 | Champs et documents de l'identité (Q-01, Q-13, Q-14) ; configuration minimale des capacités (Q-02) ; ce qui reste modifiable après soumission (Q-03) ; statuts après soumission (Q-04) ; contenu du profil et des sites (Q-16, Q-18). Hypothèses par défaut dans `docs/use-cases/README.md` | B2 | ouverte |
 | D-05 | Barèmes, taxes, arrondi ; seules les agences approuvées sont-elles publiables ? | B3 | ouverte |
 | D-06 | Acceptation automatique ou manuelle des demandes | B4 | ouverte |
 | D-07 | Statuts et transitions des commandes et colis ; contenu et durée du suivi public | B5 | ouverte |
@@ -347,6 +348,9 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | D-09 | Responsabilité inter-agences, SLA, politique d'écart et de retours | B8, B9 | ouverte |
 | D-10 | Responsables de validation et critères de certification des agences | B10 | ouverte |
 | D-11 | Rétention et calendrier des sauvegardes | B0.11, B10.20 | ouverte |
+| D-13 | Rôles autorisés pour l'onboarding (configurer : propriétaire + administrateur ; soumettre : propriétaire seul ?) — Q-05 | B2 | ouverte |
+| D-14 | Idempotence de la création d'agence ; second envoi de soumettre, activer, suspendre : 409 ou succès sans effet — Q-06, Q-11 | B2.1, B2.4, B2.5, B2.7 | ouverte |
+| D-15 | Zone desservie (onboarding) et zone tarifaire (B3) : même objet ? — Q-07 | B2.3, B3.1 | ouverte |
 | D-12 | Détecter une migration TypeORM modifiée après application (empreinte par migration) ; afficher ou non au migrateur le motif d'un refus d'adoption Drizzle (message sans donnée) | B10.18 | ouverte |
 
 Décisions prises :
@@ -359,6 +363,7 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-04 | `use-case-writer` (mode light, rapport appliqué par la session principale) | B2.S1 — use cases de l'onboarding agence | 9 UC (UC-02-09 ajouté), 111 scénarios Gherkin, 112 tests TDD prévus, 17 anomalies, 19 questions ; couverture UC 9/9, RM 4/4 ; tâche B2.10 ajoutée ; décisions D-13 à D-15 ouvertes ; en attente du user | aucune (documentation) |
 | 2026-11-03 | `back-builder` (mode light, rapport appliqué par la session principale) | B0.12 — corrections R1 à R4 de la revue sécurité | Vert : R1 E2E (404 invitation autre agence, acceptation concurrente 200/404, un seul membership), R2 `open()` attend `initialize()`, R3 adoption Drizzle par empreintes et index uniques (adoptée / refusée sur PostgreSQL réel), R4 `invalidWhereValuesBehavior` ; R5 → B10.18, empreinte des migrations TypeORM → D-12 | `npm run lint` OK · `npm run typecheck` OK · `npm test` 58/58 (relancé par la session principale) · `npm run build` OK · E2E `compose.test.yaml` OK (1re exécution en échec sur une assertion de test, corrigée) · vérification R3 sur `postgres:16-alpine` temporaire · `npm audit --omit=dev` 0 |
 | 2026-11-03 | `security-reviewer` (rapport appliqué par la session principale) | B0.12 — revue sécurité du commit `293a35b` | Aucun critique ; 1 à corriger (R1), 2 régressions du refactor (R2, R3), 2 durcissements (R4, R5) ; 2 constats antérieurs (B1.13, B1.14) | `git diff 5431052 293a35b`, lecture de `node_modules/typeorm`, `npm audit --omit=dev` (0) |
 | 2026-11-03 | Claude (session principale) | Documentation de D-01 et B0.12 | `docs/README.md`, `docs/architecture/architecture-backend.md`, `docs/architecture/adr-001-typeorm-et-architecture-normalisee.md` ; `phases.md` et ce fichier alignés | aucune (documentation) |

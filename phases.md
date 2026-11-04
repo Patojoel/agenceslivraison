@@ -113,8 +113,10 @@ Chaque phase B suit ces étapes ; elles sont cochées par lot dans `progress.md`
   - B2.7 UC-02-07 Suspendre une capacité (bloque les nouvelles demandes, garde l'historique — RM-02-03).
   - B2.8 UC-02-08 Gérer les sites (`AgencyLocation`) : créer, modifier, désactiver.
   - B2.9 Consulter l'état d'onboarding — `GET /agencies/{id}/onboarding`.
+  - B2.10 *(ajoutée le 2026-11-04, anomalie A-09 des use cases)* Lister les membres d'une agence — `GET /agencies/{id}/members` (curseur, membres actifs de l'agence de l'appelant uniquement) ; nécessaire à F1.3.
 - **Règles** : RM-02-01 agence non approuvée peut rester brouillon ; RM-02-02 capacité = configuration minimale ; RM-02-03 suspension sans effacement ; RM-02-04 vérification ≠ assurance.
 - **Événements** : `AgencyRegistered`, `AgencyCapabilityEnabled` (+ audit).
+- **Use cases** : `docs/use-cases/02-agences-onboarding/` (S1, 2026-11-04). **Décisions attendues** : D-04, D-13 (rôles), D-14 (idempotence, second envoi), D-15 (zone desservie = zone tarifaire ?).
 - **À VALIDER** : champs et documents obligatoires de l'identité ; configuration minimale de chaque capacité ; statuts après `submitted` (approbation en B10/admin) ; critères de certification, responsables, expiration.
 - **Critère de sortie** : agence brouillon → soumise, validations, isolation entre agences.
 
