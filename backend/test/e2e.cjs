@@ -459,6 +459,9 @@ const { Client } = require('pg');
       const problemOf = async (response, status, code, message) => {
         assert.equal(response.status, status, message);
         assert.match(response.headers.get('content-type'), /^application\/problem\+json/, message);
+        // B3.18: no cache keeps an error, no browser guesses its type.
+        assert.equal(response.headers.get('cache-control'), 'no-store', `${message}: never cached`);
+        assert.equal(response.headers.get('x-content-type-options'), 'nosniff', `${message}: not sniffed`);
         const problem = await response.json();
         if (code !== undefined) assert.equal(problem.code, code, message);
         return problem;

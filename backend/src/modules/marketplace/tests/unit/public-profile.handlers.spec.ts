@@ -38,7 +38,7 @@ test('an administrator and an agent are refused, without taking any lock; strang
   for (const actor of [ADMIN, AGENT]) await assert.rejects(publishAs(kit, actor), MarketplaceForbidden);
   for (const actor of [FORMER, OUTSIDER, OTHER_OWNER]) await assert.rejects(publishAs(kit, actor), MarketplaceAgencyNotFound);
   await assert.rejects(publishAs(kit, OWNER, '00000000-0000-4000-8000-0000000000ff'), MarketplaceAgencyNotFound);
-  assert.deepEqual([kit.access.sharedLocks, kit.profiles.locks, kit.profiles.adds, kit.events.published.length], [0, 0, 0, 0]);
+  assert.deepEqual([kit.access.publicationLocks, kit.profiles.locks, kit.profiles.adds, kit.events.published.length], [0, 0, 0, 0]);
 });
 
 test('a former member is refused even when the role changes while the caller waits for the lock', async () => {
@@ -146,4 +146,14 @@ test('the state tells what hides a published profile and what prevents a new one
   assert.deepEqual([hidden.published, hidden.visible, hidden.obstacles, hidden.slug], [true, false, ['no_active_capability'], 'express-douala']);
   kit.access.setView(AGENCY, view({ submitted: false, tradeName: `Agence ${AGENCY.slice(0, 8)}` }));
   assert.deepEqual((await kit.read.handle({ agencyId: AGENCY, userId: OWNER })).obstacles, ['agency_not_submitted', 'provisional_trade_name']);
+});
+
+test('publishing and unpublishing take the publication lock of the agency, once, before the profile (B3.17)', async () => {
+  const kit = setup();
+  const order: string[] = [];
+  kit.access.onLock = () => order.push(`agency:${kit.profiles.locks}`);
+  await publishAs(kit, OWNER);
+  await unpublishAs(kit, OWNER);
+  assert.equal(kit.access.publicationLocks, 2);
+  assert.deepEqual(order, ['agency:0', 'agency:1']);
 });

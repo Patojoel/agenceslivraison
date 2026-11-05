@@ -7,7 +7,8 @@ import { CapabilityType, isCapabilityType } from '../../../domain/capability';
 interface AgencyRow { trade_name: string; description: string | null; status: string }
 interface ZoneRow { id: string; city: string; district: string | null }
 
-const LOCK_SHARED = 'SELECT id FROM agencies WHERE id = $1::uuid FOR SHARE';
+/** `FOR NO KEY UPDATE` conflicts with the `FOR SHARE` of the other modules' writes and with the `FOR UPDATE` of `agencies`. */
+const LOCK_FOR_PUBLICATION = 'SELECT id FROM agencies WHERE id = $1::uuid FOR NO KEY UPDATE';
 const AGENCY = 'SELECT trade_name, description, status FROM agencies WHERE id = $1::uuid';
 /** The state of a capability is its last transition. */
 const ACTIVE_CAPABILITIES = `
@@ -47,9 +48,9 @@ export class ReadAgencyPublicViewTypeOrmRepository implements ReadAgencyPublicVi
     };
   }
 
-  async publicViewOfLockedShared(agencyId: string): Promise<AgencyPublicView | null> {
+  async publicViewOfLockedForPublication(agencyId: string): Promise<AgencyPublicView | null> {
     const manager = await this.connection.manager();
-    await manager.query(LOCK_SHARED, [agencyId]);
+    await manager.query(LOCK_FOR_PUBLICATION, [agencyId]);
     return this.publicViewOf(agencyId);
   }
 }

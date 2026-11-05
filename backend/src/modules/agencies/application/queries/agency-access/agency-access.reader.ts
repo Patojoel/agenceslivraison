@@ -34,8 +34,11 @@ export class AgencyAccessReader {
     return this.publicView.publicViewOf(agencyId);
   }
 
-  /** Only to be called once the caller's role was checked, so that a stranger cannot hold up the agency. */
-  publicViewOfLockedShared(agencyId: string): Promise<AgencyPublicView | null> {
-    return this.publicView.publicViewOfLockedShared(agencyId);
+  /**
+   * Serializes a publication with every other write of the agency (see the port). Only to be called once the caller's role
+   * was checked, so that a stranger cannot hold up the agency.
+   */
+  publicViewOfLockedForPublication(agencyId: string): Promise<AgencyPublicView | null> {
+    return this.publicView.publicViewOfLockedForPublication(agencyId);
   }
 }

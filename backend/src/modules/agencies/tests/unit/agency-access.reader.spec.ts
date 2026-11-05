@@ -18,7 +18,7 @@ class RecordingPublicView implements ReadAgencyPublicViewRepository {
     return PUBLIC_VIEW;
   }
 
-  async publicViewOfLockedShared(agencyId: string): Promise<AgencyPublicView | null> {
+  async publicViewOfLockedForPublication(agencyId: string): Promise<AgencyPublicView | null> {
     this.calls.push(`view-locked:${agencyId}`);
     return PUBLIC_VIEW;
   }
@@ -60,11 +60,11 @@ test('the shared lock is taken only by the variant that asks for it', async () =
   assert.deepEqual(delivery.calls, [`state:${AGENCY}`, `locked:${AGENCY}`]);
 });
 
-test('the public view is read without a lock, and with a shared lock only by the variant that asks for it', async () => {
+test('the public view is read without a lock, and under the publication lock only by the variant that asks for it', async () => {
   const view = new RecordingPublicView();
   const reader = new AgencyAccessReader(new RecordingDelivery(), view);
   assert.deepEqual(await reader.publicViewOf(AGENCY), PUBLIC_VIEW);
   assert.deepEqual(view.calls, [`view:${AGENCY}`]);
-  assert.deepEqual(await reader.publicViewOfLockedShared(AGENCY), PUBLIC_VIEW);
+  assert.deepEqual(await reader.publicViewOfLockedForPublication(AGENCY), PUBLIC_VIEW);
   assert.deepEqual(view.calls, [`view:${AGENCY}`, `view-locked:${AGENCY}`]);
 });

@@ -11,10 +11,11 @@ export interface AgencyAccess {
   /** `null` for an unknown agency. */
   publicViewOf(agencyId: string): Promise<AgencyPublicView | null>;
   /**
-   * The same, after a shared lock on the agency for the rest of the transaction: a capability cannot be suspended between
-   * the check and the write. Only to be called once the caller's role was checked.
+   * The same, after locking the agency for the rest of the transaction against every other write of it: a capability
+   * cannot be suspended, nor a new version of the rate card committed, between the check and the write of the directory.
+   * Only to be called once the caller's role was checked.
    */
-  publicViewOfLockedShared(agencyId: string): Promise<AgencyPublicView | null>;
+  publicViewOfLockedForPublication(agencyId: string): Promise<AgencyPublicView | null>;
 }
 
 export const AGENCY_ACCESS = Symbol('AgencyAccess');

@@ -16,7 +16,7 @@ export class AgenciesAgencyAccess implements AgencyAccess {
     return this.reader.publicViewOf(agencyId);
   }
 
-  publicViewOfLockedShared(agencyId: string): Promise<AgencyPublicView | null> {
-    return this.reader.publicViewOfLockedShared(agencyId);
+  publicViewOfLockedForPublication(agencyId: string): Promise<AgencyPublicView | null> {
+    return this.reader.publicViewOfLockedForPublication(agencyId);
   }
 }

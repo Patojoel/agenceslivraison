@@ -38,7 +38,7 @@ export function view(overrides: Partial<AgencyPublicView> = {}): AgencyPublicVie
 export class FakeAgencyAccess implements AgencyAccess {
   private readonly roles = new Map<string, MemberRole>();
   private readonly views = new Map<string, AgencyPublicView>();
-  sharedLocks = 0;
+  publicationLocks = 0;
   /** Called after the lock is taken, to simulate a change made while the caller was waiting. */
   onLock: (() => void) | null = null;
 
@@ -68,8 +68,8 @@ export class FakeAgencyAccess implements AgencyAccess {
     return this.views.get(agencyId) ?? null;
   }
 
-  async publicViewOfLockedShared(agencyId: string): Promise<AgencyPublicView | null> {
-    this.sharedLocks += 1;
+  async publicViewOfLockedForPublication(agencyId: string): Promise<AgencyPublicView | null> {
+    this.publicationLocks += 1;
     this.onLock?.();
     return this.publicViewOf(agencyId);
   }

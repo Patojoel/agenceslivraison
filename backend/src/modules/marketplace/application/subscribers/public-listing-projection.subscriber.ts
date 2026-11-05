@@ -31,10 +31,16 @@ function agencyOf(event: DomainEvent): string | null {
 
 /**
  * Keeps `public_agency_listings` in step with the agencies, in the transaction of the action that raised the event (the
- * compromise of plan B3: a failure here cancels the action, so the directory is never behind what was committed). It
- * rebuilds the row whole from what `agencies` and `pricing` expose, so that it can run twice with the same result, and
- * does nothing for an agency that never published a fiche. The lock of the profile row is taken before anything is read:
- * two rebuilds of one agency queue up, and the second one reads what the first one committed.
+ * compromise of plan B3: a failure here cancels the action). It rebuilds the row whole from what `agencies` and `pricing`
+ * expose, so that it can run twice with the same result, and does nothing for an agency that never published a fiche.
+ *
+ * What keeps the row in step with what was committed:
+ * - every action that raises one of these events holds a lock on the agency row, exclusive for `agencies`, shared for
+ *   `pricing`; a publication or a withdrawal locks it against both (`FOR NO KEY UPDATE`, B3.17), so a first publication,
+ *   whose profile row is not committed yet, never runs beside a rate card change that would not see it;
+ * - the lock of the profile row is taken before anything is read: two rebuilds of one agency queue up, and the second one
+ *   reads what the first one committed. Two `pricing` writes of one agency share the agency lock, and the last one to
+ *   take the profile lock reads, and writes, the state in force.
  */
 @Injectable()
 export class PublicListingProjectionSubscriber implements DomainEventSubscriber {

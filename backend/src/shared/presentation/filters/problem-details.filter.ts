@@ -14,6 +14,9 @@ const STATUS_BY_KIND: Record<DomainExceptionKind, number> = {
 
 export function sendProblem(res: Response, req: Request, status: number, title: string, detail: string, extras?: ProblemExtras): void {
   const code = extras?.code ?? (status === 503 ? 'SERVICE_UNAVAILABLE' : status >= 500 ? 'INTERNAL_ERROR' : 'HTTP_ERROR');
+  // An error is about this request only: no cache keeps it (a 404 must not outlive a publication), no browser guesses its type.
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.status(status).type('application/problem+json').json({
     type: 'about:blank', title, status, detail, instance: req.path,
     code,
