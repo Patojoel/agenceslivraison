@@ -14,7 +14,7 @@ const profile = (published = true): PublicProfileSnapshot => ({
 
 test('the listing holds exactly the fields the specification allows, and nothing else', () => {
   const listing = composePublicListing(profile(), view(), new Map([[AKWA, 1000]]));
-  assert.deepEqual(Object.keys(listing).sort(), ['agencyId', 'capabilities', 'description', 'name', 'nameKey', 'publishedAt', 'siteCities', 'slug', 'verification', 'visible', 'zones']);
+  assert.deepEqual(Object.keys(listing).sort(), ['agencyId', 'capabilities', 'cityKeys', 'description', 'districtKeys', 'name', 'nameKey', 'publishedAt', 'siteCities', 'slug', 'verification', 'visible', 'zones']);
   assert.deepEqual(Object.keys(listing.zones[0] ?? {}).sort(), ['city', 'district', 'id', 'startingPrice']);
 });
 
@@ -55,4 +55,18 @@ test('the listing is visible only when the profile is published and the agency s
   assert.equal(composePublicListing(profile(), view({ tradeName: 'Express‮Douala' }), new Map()).visible, false);
   assert.equal(composePublicListing(profile(), view({ tradeName: `Agence ${AGENCY.slice(0, 8)}` }), new Map()).visible, false);
   assert.equal(composePublicListing(profile(), view({ submitted: false }), new Map()).visible, false);
+});
+
+test('the search keys hold the cities of the zones and sites, and the districts of the zones, in comparison form', () => {
+  const listing = composePublicListing(profile(), view({
+    zones: [{ id: AKWA, city: 'Douala', district: 'Bonabéri' }, { id: BONABERI, city: 'YAOUNDÉ', district: null }],
+    siteCities: ['Édéa', 'douala'],
+  }), new Map());
+  assert.deepEqual(listing.cityKeys, ['douala', 'edea', 'yaounde']);
+  assert.deepEqual(listing.districtKeys, ['doualabonaberi', 'yaounde']);
+});
+
+test('an agency without zone is found by the cities of its sites only', () => {
+  const listing = composePublicListing(profile(), view({ capabilities: ['storage'], zones: [], siteCities: ['Kribi'] }), new Map());
+  assert.deepEqual([listing.cityKeys, listing.districtKeys], [['kribi'], []]);
 });

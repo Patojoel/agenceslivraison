@@ -145,6 +145,7 @@ Chaque phase B suit ces étapes ; elles sont cochées par lot dans `progress.md`
   - B3.13 Index et EXPLAIN de la recherche (agent `query-perf`), rate limiting des routes publiques.
   - B3.14 *(ajoutée le 2026-11-04, anomalie A-35 des use cases)* Lire la grille tarifaire et l'historique de ses versions (tout membre actif, curseur).
   - B3.15 *(ajoutée le 2026-11-04, anomalie A-35 des use cases)* Lister et consulter les devis de l'agence (tout membre actif, curseur).
+  - B3.16 *(ajoutée le 2026-11-05)* Rendre déterministe le test E2E de course de versionnement de grille (instable vu une fois).
 - **Règles** : RM-05-05 tarifs propres à chaque agence ; RM-03-05 tarifs affichés non garantis sans devis.
 - **Événements** : projection publique alimentée par `AgencyCapabilityEnabled` (in-process tant qu'aucun besoin inter-domaines n'est validé).
 - **Use cases** : `docs/use-cases/05-tarifs-zones/` et `docs/use-cases/03-marketplace-publique/` (S1, 2026-11-04). Publication tranchée (D-05) : agence soumise publiable avec la mention « non vérifiée ».

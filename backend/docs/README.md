@@ -8,7 +8,7 @@ Cette documentation aide à développer les interfaces `front-office`, `admin-ba
 | Identité et accès | Inscription, sessions et accès agence disponibles | [Identité et accès](routes/identite-acces.md) |
 | Agences et onboarding | Création d'un brouillon et état d'onboarding disponibles ; reste du lot B2 prévu | [Agences et onboarding](routes/agences-onboarding.md) |
 | Tarifs | Grille de livraison (création, versions, historique) et simulation de prix disponibles ; devis prévus | [Tarifs](routes/tarifs.md) |
-| Marketplace | Publication et retrait de la fiche publique, état de la fiche disponibles ; annuaire et recherche publics prévus | [Marketplace](routes/marketplace.md) |
+| Marketplace | Publication et retrait de la fiche publique, état de la fiche, annuaire public (recherche, filtres, fiche par adresse) disponibles | [Marketplace](routes/marketplace.md) |
 | Commandes, livraison et suivi | Prévu | [Groupes métier prévus](routes/groupes-prevus.md) |
 | Stockage, transferts et retours | Prévu | [Groupes métier prévus](routes/groupes-prevus.md) |
 | Administration et rapports | Prévu | [Groupes métier prévus](routes/groupes-prevus.md) |

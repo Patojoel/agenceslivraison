@@ -9,6 +9,9 @@ import { AGENCY_ACCESS } from './application/ports/agency-access.port';
 import { PUBLIC_LISTING_WRITER } from './application/ports/public-listing.writer';
 import { PUBLIC_PRICES } from './application/ports/public-prices.port';
 import { READ_AGENCY_PUBLIC_PROFILE_REPOSITORY } from './application/ports/read-agency-public-profile.repository';
+import { READ_PUBLIC_DIRECTORY_REPOSITORY } from './application/ports/read-public-directory.repository';
+import { GetPublicAgencyHandler } from './application/queries/get-public-agency/get-public-agency.handler';
+import { SearchPublicAgenciesHandler } from './application/queries/search-public-agencies/search-public-agencies.handler';
 import { GetPublicProfileHandler } from './application/queries/get-public-profile/get-public-profile.handler';
 import { MarketplaceAuditSubscriber } from './application/subscribers/marketplace-audit.subscriber';
 import { PublicListingProjectionSubscriber } from './application/subscribers/public-listing-projection.subscriber';
@@ -16,23 +19,28 @@ import { AGENCY_PUBLIC_PROFILE_REPOSITORY } from './domain/ports/agency-public-p
 import { AgenciesAgencyAccess } from './infrastructure/agencies/agencies-agency-access';
 import { AgencyPublicProfileTypeOrmRepository } from './infrastructure/persistence/typeorm/agency-public-profile.typeorm.repository';
 import { PublicListingTypeOrmWriter } from './infrastructure/persistence/typeorm/public-listing.typeorm.writer';
+import { ReadPublicDirectoryTypeOrmRepository } from './infrastructure/persistence/typeorm/read-public-directory.typeorm.repository';
 import { ReadAgencyPublicProfileTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-public-profile.typeorm.repository';
 import { PricingPublicPrices } from './infrastructure/pricing/pricing-public-prices';
+import { PublicDirectoryController } from './presentation/http/public-directory.controller';
 import { PublicProfileController } from './presentation/http/public-profile.controller';
 
 /** Marketplace reaches `agencies` and `pricing` only through what they export (`AgencyAccessReader`, `PublicPricingReader`). */
 @Module({
   imports: [IdentityModule, AgenciesModule, PricingModule],
-  controllers: [PublicProfileController],
+  controllers: [PublicProfileController, PublicDirectoryController],
   providers: [
     { provide: AGENCY_ACCESS, useClass: AgenciesAgencyAccess },
     { provide: PUBLIC_PRICES, useClass: PricingPublicPrices },
     { provide: AGENCY_PUBLIC_PROFILE_REPOSITORY, useClass: AgencyPublicProfileTypeOrmRepository },
     { provide: READ_AGENCY_PUBLIC_PROFILE_REPOSITORY, useClass: ReadAgencyPublicProfileTypeOrmRepository },
+    { provide: READ_PUBLIC_DIRECTORY_REPOSITORY, useClass: ReadPublicDirectoryTypeOrmRepository },
     { provide: PUBLIC_LISTING_WRITER, useClass: PublicListingTypeOrmWriter },
     PublishPublicProfileHandler,
     UnpublishPublicProfileHandler,
     GetPublicProfileHandler,
+    SearchPublicAgenciesHandler,
+    GetPublicAgencyHandler,
     MarketplaceAuditSubscriber,
     PublicListingProjectionSubscriber,
   ],

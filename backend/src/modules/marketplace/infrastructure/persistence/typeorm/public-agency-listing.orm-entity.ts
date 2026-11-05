@@ -4,7 +4,7 @@ import { Check, Column, Entity, Index, JoinColumn, ManyToOne, PrimaryColumn } fr
  * The projection the directory reads: one row per agency that has a profile, rewritten whole by the subscriber of the
  * module whenever something it shows changes. Only the fields of the closed list of D-23 (see `PublicListing`): no legal
  * name, phone, e-mail, registration number, address or member. `agency_id` is the key and never leaves the module. The
- * index serves the alphabetical order of the visible rows (name, then slug); the search indexes are those of the search lot.
+ * index serves the alphabetical order of the visible rows (name, then slug); no other index is kept: the measures of B3.13 (docs/routes/marketplace.md) show none is worth its cost at the expected volume.
  */
 @Entity({ name: 'public_agency_listings' })
 @Index('public_agency_listings_slug_unique', ['slug'], { unique: true })
@@ -47,6 +47,14 @@ export class PublicAgencyListingOrmEntity {
 
   @Column({ name: 'site_cities', type: 'text', array: true })
   siteCities: string[];
+
+  /** Search keys (comparison form of the cities of the active zones and sites); never shown. */
+  @Column({ name: 'city_keys', type: 'text', array: true })
+  cityKeys: string[];
+
+  /** Search keys (city and district of the active zones, empty district for a whole city); never shown. */
+  @Column({ name: 'district_keys', type: 'text', array: true })
+  districtKeys: string[];
 
   @Column({ name: 'published_at', type: 'timestamptz' })
   publishedAt: Date;

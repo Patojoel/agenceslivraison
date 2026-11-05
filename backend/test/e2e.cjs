@@ -15,7 +15,9 @@ const { Client } = require('pg');
       await client.query("INSERT INTO schema_migrations (version) VALUES ('0001_initial')");
     }
   } finally { await client.end(); }
-  const env = { ...process.env, DATABASE_URL: process.env.TEST_DATABASE_URL, PORT: '3107', JWT_SECRET: 'test-only-signing-key-0123456789abcdef' };
+  // The limits of production are 120 a minute for every route and 60 for the public directory (the defaults). This run makes thousands of calls from one address, so its main
+  // instance raises both; the 429 of the public routes is checked below against a second instance started with the defaults.
+  const env = { ...process.env, DATABASE_URL: process.env.TEST_DATABASE_URL, PORT: '3107', JWT_SECRET: 'test-only-signing-key-0123456789abcdef', RATE_LIMIT_DEFAULT_PER_MINUTE: '100000', RATE_LIMIT_PUBLIC_PER_MINUTE: '100000' };
   const app = spawn(process.execPath, ['dist/main.js'], { env, stdio: 'inherit' });
   try {
     let live;
@@ -1824,8 +1826,6 @@ const { Client } = require('pg');
       // B3.9: publishing and withdrawing the public fiche, and the projection the directory reads.
       {
         const previousActive = activeOne;
-        // The zone routes were called about a hundred times by the blocks above: wait for a fresh window of the global rate limit (120 a minute and per route).
-        await delay(61000);
         const mine = [];
         const rejectsOnDatabase = (work, pattern, message) => assert.rejects(work, pattern, message);
         const publish = (agency, access, body) => act('POST', `${agency}/public-profile/publish`, access, body);
@@ -1915,7 +1915,7 @@ const { Client } = require('pg');
         assert.deepEqual([stored.slug, stored.published, stored.published_by, stored.unpublished_at], ['fiche-express-douala', true, account.id, null]);
         assert.deepEqual((await marketTrail(fiche)).map(entry => [entry.action, entry.user_id, entry.resource_id, entry.details]), [['marketplace.profile_published', account.id, fiche, null]], 'one trace, no value');
         const projected = await listingOf(fiche);
-        assert.deepEqual(Object.keys(projected).sort(), ['agency_id', 'capabilities', 'description', 'name', 'name_key', 'published_at', 'site_cities', 'slug', 'updated_at', 'verification', 'visible', 'zones'], 'the projection holds exactly the closed list of fields');
+        assert.deepEqual(Object.keys(projected).sort(), ['agency_id', 'capabilities', 'city_keys', 'description', 'district_keys', 'name', 'name_key', 'published_at', 'site_cities', 'slug', 'updated_at', 'verification', 'visible', 'zones'], 'the projection holds exactly the closed list of fields');
         assert.deepEqual([projected.slug, projected.name, projected.name_key, projected.verification, projected.capabilities, projected.site_cities, projected.visible, projected.description], ['fiche-express-douala', 'Fiche Express Douala', 'fiche express douala', 'unverified', ['delivery'], ['Douala'], true, null]);
         assert.deepEqual(projected.zones, [{ id: akwaRow.id, city: 'Douala', district: 'Akwa', startingPrice: null }, { id: bonaRow.id, city: 'Douala', district: 'Bonabéri', startingPrice: null }], 'active zones, on quote while there is no rate card');
         const projectedText = JSON.stringify(projected);
@@ -2067,7 +2067,313 @@ const { Client } = require('pg');
         // Neighbours: nothing leaked from or to another agency, and no public route yet.
         assert.equal(await listingOf(draft), undefined, 'a draft has no listing');
         assert.equal(await listingOf(noCapability), undefined, 'an agency that never published has no listing, whatever happened to it');
-        assert.equal((await fetch(`${api}/public/agencies`)).status, 404, 'the public routes are for the next slice');
+        // B3.10 to B3.13: the public directory (search, filters, fiche) and its limits.
+        {
+          const directory = (query = '', headers = {}) => fetch(`${api}/public/agencies${query}`, { headers });
+          const ficheOf = (slug, headers = {}) => fetch(`${api}/public/agencies/${slug}`, { headers });
+          const keyOf = (text) => text.replace(/\s+/g, ' ').trim().normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+          const LIST_KEYS = ['capabilities', 'cities', 'hybrid', 'slug', 'tradeName', 'verification'];
+          const DETAIL_KEYS = ['capabilities', 'description', 'hybrid', 'pricing', 'publishedAt', 'siteCities', 'slug', 'tradeName', 'verification', 'zones'];
+          const slugsOf = (body) => body.items.map(item => item.slug);
+          const listed = async (query, headers) => {
+            const response = await directory(query, headers);
+            assert.equal(response.status, 200, `the directory answers ${query}`);
+            return response.json();
+          };
+          const find = async (query) => slugsOf(await listed(`?${query}`));
+          /** Every page of a search, following `nextCursor`. */
+          const traverse = async (query, limit) => {
+            const pages = [];
+            let cursor = null;
+            do {
+              const body = await listed(`?${query}${query ? '&' : ''}limit=${limit}${cursor ? `&cursor=${cursor}` : ''}`);
+              pages.push(body);
+              cursor = body.nextCursor;
+              assert.equal(body.hasMore, cursor !== null, 'hasMore and nextCursor agree');
+            } while (cursor !== null && pages.length < 100);
+            return pages;
+          };
+          const oracle = async (where = 'TRUE') => (await agencyPool.query(`SELECT slug FROM public_agency_listings WHERE visible AND ${where} ORDER BY name_key, slug`)).rows.map(row => row.slug);
+          const inserted = [];
+          /** A fiche written straight into the projection, for volume and ordering; the agencies of the real routes are used for what depends on them. */
+          const insertListing = async ({ name, slug, capabilities = ['delivery'], zones = [], siteCities = ['Douala'], visible = true }) => {
+            const id = await configAgency();
+            await agencyPool.query('INSERT INTO agency_public_profiles (agency_id, slug, published, published_at, published_by) VALUES ($1, $2, true, now(), $3)', [id, slug, account.id]);
+            const cityKeys = [...new Set([...zones.map(zone => keyOf(zone.city)), ...siteCities.map(keyOf)])].sort();
+            const districtKeys = [...new Set(zones.map(zone => `${keyOf(zone.city)}\u001f${zone.district ? keyOf(zone.district) : ''}`))].sort();
+            await agencyPool.query(
+              `INSERT INTO public_agency_listings (agency_id, slug, name, name_key, description, verification, capabilities, zones, site_cities, city_keys, district_keys, published_at, visible, updated_at)
+               VALUES ($1, $2, $3, $4, NULL, 'unverified', $5, $6::jsonb, $7, $8, $9, now(), $10, now())`,
+              [id, slug, name, keyOf(name), capabilities, JSON.stringify(zones.map(zone => ({ id: randomUUID(), district: null, startingPrice: null, ...zone }))), siteCities, cityKeys, districtKeys, visible],
+            );
+            inserted.push(id);
+            return id;
+          };
+          const publishNew = async (name, tweak) => {
+            const agency = await submittedAgency(name);
+            if (tweak) await tweak(agency);
+            assert.equal((await publish(agency, ownerAccess)).status, 200, `${name} is published`);
+            return agency;
+          };
+          const slugOf = async (agency) => (await profileOf(agency)).slug;
+          /** An event of `pricing` (it does not load the agency, whose name may be one the domain would refuse) makes the projection rebuild. */
+          const refreshProjection = async (agency) => {
+            const akwaZone = (await zoneRows(agency)).find(zone => zone.district === 'Akwa');
+            assert.equal((await act('POST', `${agency}/rate-card`, ownerAccess, { lines: [{ zoneId: akwaZone.id, tiers: [{ upTo: '1 kg', price: 1000 }, { upTo: '5 kg', price: 1500 }] }] })).status, 201);
+          };
+          const withoutTrace = (problem) => ({ ...problem, traceId: undefined, instance: undefined });
+          const SECRETS = ['Express Douala SARL', '+237677123456', '677123456', 'Rue Joss', 'RC/DLA/2024/B/1234', 'M012345678901A', 'contact@express.example', account.id, adminUser, invitedUser];
+
+          // Fiches through the real routes: Express (delivery, two priced zones), Stock (storage only, a site in Kribi), Logi (hybrid, one whole city served).
+          const express = await publishNew('Express Flt9', async (agency) => {
+            assert.equal((await patchAgency(`${agency}/profile`, adminAccess, { description: '<b>Promo</b> Livraison 7j/7' }, await versionOf(agency))).status, 200);
+            assert.equal((await addZone(agency, ownerAccess, { city: 'Douala', district: 'Bonabéri' })).status, 201);
+            const zones = await zoneRows(agency);
+            const [akwaZone, bonaberiZone] = [zones.find(zone => zone.district === 'Akwa'), zones.find(zone => zone.district === 'Bonabéri')];
+            const card = { lines: [{ zoneId: akwaZone.id, tiers: [{ upTo: '1 kg', price: 1000 }, { upTo: '5 kg', price: 1500 }] }, { zoneId: bonaberiZone.id, tiers: [{ upTo: '1 kg', price: 1500 }, { upTo: '10 kg', price: 2500 }] }] };
+            assert.equal((await act('POST', `${agency}/rate-card`, ownerAccess, card)).status, 201);
+          });
+          const stock = await publishNew('Stock Flt9', async (agency) => {
+            assert.equal((await enable(agency, 'storage', ownerAccess)).status, 200);
+            assert.equal((await suspend(agency, 'delivery', ownerAccess)).status, 200);
+            assert.equal((await retireZone(agency, (await zoneRows(agency))[0].id, ownerAccess)).status, 200, 'the last zone can go once delivery is suspended');
+          });
+          const kribiSite = await (await createSite(stock, ownerAccess, { name: 'Dépôt Kribi', city: 'Kribi', address: 'Rue du Port, Kribi' })).json();
+          const logi = await publishNew('Logi Flt9', async (agency) => {
+            assert.equal((await enable(agency, 'storage', ownerAccess)).status, 200);
+            assert.equal((await addZone(agency, ownerAccess, { city: 'Yaoundé' })).status, 201);
+          });
+          const [expressSlug, stockSlug, logiSlug] = [await slugOf(express), await slugOf(stock), await slugOf(logi)];
+          assert.deepEqual([expressSlug, stockSlug, logiSlug], ['express-flt9', 'stock-flt9', 'logi-flt9']);
+
+          // Fiches that must never show, each for its own reason.
+          const hiddenSlugs = [];
+          const neverPublished = await submittedAgency('Taxi Flt9');
+          assert.equal(await profileOf(neverPublished), undefined);
+          hiddenSlugs.push('taxi-flt9');
+          const draft = await prepared();
+          mine.push(draft);
+          await setName(draft, 'Brouillon Flt9');
+          assert.equal(await listingOf(draft), undefined);
+          hiddenSlugs.push('brouillon-flt9');
+          const withdrawn = await publishNew('Retiré Flt9');
+          assert.equal((await unpublish(withdrawn, ownerAccess)).status, 200);
+          hiddenSlugs.push(await slugOf(withdrawn));
+          const noCapabilityLeft = await publishNew('Sans Capacité Flt9');
+          assert.equal((await suspend(noCapabilityLeft, 'delivery', ownerAccess)).status, 200);
+          hiddenSlugs.push(await slugOf(noCapabilityLeft));
+          const bidi = await publishNew('Bidi Flt9');
+          await setName(bidi, 'Bidi\u202EFlt9');
+          await refreshProjection(bidi);
+          hiddenSlugs.push(await slugOf(bidi));
+          const provisional = await publishNew('Provisoire Flt9');
+          await agencyPool.query("UPDATE agencies SET trade_name = 'Agence ' || substr(id::text, 1, 8) WHERE id = $1", [provisional]);
+          await refreshProjection(provisional);
+          hiddenSlugs.push(await slugOf(provisional));
+          await insertListing({ name: 'Masquée Flt9', slug: 'masquee-flt9', visible: false });
+          hiddenSlugs.push('masquee-flt9');
+          assert.deepEqual([(await listingOf(withdrawn)).visible, (await listingOf(noCapabilityLeft)).visible, (await listingOf(bidi)).visible, (await listingOf(provisional)).visible], [false, false, false, false], 'these listings exist: it is the visibility that hides them');
+
+          // Open to everyone, read only, nothing cached or set.
+          const updatedBefore = (await listingOf(express)).updated_at.toISOString();
+          const auditBefore = (await agencyPool.query('SELECT count(*)::int AS total FROM identity_audit')).rows[0].total;
+          const anonymous = await directory('?q=flt9');
+          assert.equal(anonymous.status, 200, 'no token needed');
+          assert.match(anonymous.headers.get('content-type'), /^application\/json/);
+          assert.match(anonymous.headers.get('cache-control'), /no-store/, 'no shared cache: a withdrawn fiche is gone at the next read');
+          assert.equal(anonymous.headers.get('set-cookie'), null, 'no cookie');
+          const anonymousBody = await anonymous.json();
+          assert.deepEqual(slugsOf(anonymousBody), [expressSlug, logiSlug, stockSlug], 'alphabetical: Express, Logi, Stock; the hidden fiches are absent');
+          assert.deepEqual([anonymousBody.nextCursor, anonymousBody.hasMore], [null, false]);
+          assert.deepEqual(Object.keys(anonymousBody).sort(), ['hasMore', 'items', 'nextCursor']);
+          for (const [label, headers] of [['a valid token', authHeaders(ownerAccess)], ['an invalid token', { authorization: 'Bearer invalid' }], ['a malformed header', { authorization: 'Basic abc' }]]) {
+            const response = await directory('?q=flt9', headers);
+            assert.equal(response.status, 200, `${label} is ignored: the route has no guard, so it cannot tell a visitor from a member`);
+            assert.deepEqual(await response.json(), anonymousBody, `${label}: the same body as a visitor`);
+          }
+          assert.deepEqual(anonymousBody.items.map(item => Object.keys(item).sort()), [LIST_KEYS, LIST_KEYS, LIST_KEYS], 'every result holds exactly the closed list of fields');
+          assert.deepEqual(anonymousBody.items[0], { slug: 'express-flt9', tradeName: 'Express Flt9', verification: 'unverified', capabilities: ['delivery'], hybrid: false, cities: ['Douala'] });
+          assert.deepEqual(anonymousBody.items[1], { slug: 'logi-flt9', tradeName: 'Logi Flt9', verification: 'unverified', capabilities: ['delivery', 'storage'], hybrid: true, cities: ['Douala', 'Yaoundé'] });
+          assert.deepEqual(anonymousBody.items[2], { slug: 'stock-flt9', tradeName: 'Stock Flt9', verification: 'unverified', capabilities: ['storage'], hybrid: false, cities: ['Douala', 'Kribi'] });
+          const everything = JSON.stringify(await Promise.all([directory('?limit=50'), ficheOf(expressSlug), ficheOf(stockSlug), ficheOf(logiSlug)].map(async request => (await request).json())));
+          for (const secret of [...SECRETS, express, stock, logi, ...(await zoneRows(express)).map(zone => zone.id)]) assert.ok(!everything.includes(secret), `no response holds "${secret}"`);
+          assert.ok(!/agency_?id|zoneId|"id"|city_?keys|district_?keys|name_?key|rccm|niu|phone|email/i.test(everything), 'no private field name either');
+
+          // Every search parameter, alone and combined.
+          assert.deepEqual(await find('q=EXPRESS%20FLT9'), [expressSlug], 'case is ignored');
+          assert.deepEqual(await find('q=%C3%A9xpress%20flt9'), [expressSlug], 'accents are ignored');
+          assert.deepEqual(await find('q=express%20%20flt9'), [expressSlug], 'repeated spaces are ignored');
+          assert.deepEqual(await listed('?q=zzz'), { items: [], nextCursor: null, hasMore: false }, 'nothing found: an empty list');
+          for (const literal of ['%25%25', '_x', '%5C%5C', 'express%25', encodeURIComponent("'; DROP TABLE public_agency_listings; --")]) assert.deepEqual(await find(`q=${literal}`), [], `the text is searched literally: ${literal}`);
+          assert.equal((await agencyPool.query("SELECT to_regclass('public_agency_listings') AS name")).rows[0].name, 'public_agency_listings', 'the table is still there');
+          assert.deepEqual(await find('q=flt9&city=douala'), [expressSlug, logiSlug, stockSlug], 'a zone of the city, or a site of the city');
+          assert.deepEqual(await find('q=flt9&city=DOUALA'), await find('q=flt9&city=Douala'));
+          assert.deepEqual(await find('q=flt9&city=yaound%C3%A9'), [logiSlug]);
+          assert.deepEqual(await find('q=flt9&city=Yaounde'), [logiSlug], 'accents are ignored in a city');
+          assert.deepEqual(await find('q=flt9&city=kribi'), [stockSlug], 'the city of an active site counts');
+          assert.deepEqual(await find('q=flt9&city=douala&district=akwa'), [expressSlug, logiSlug]);
+          assert.deepEqual(await find('q=flt9&city=douala&district=bonab%C3%A9ri'), [expressSlug]);
+          assert.deepEqual(await find('q=flt9&city=yaounde&district=bastos'), [logiSlug], 'a zone that covers the whole city serves each of its districts');
+          assert.deepEqual(await find('q=flt9&city=kribi&district=centre'), [], 'a site has no district: it never serves one');
+          assert.deepEqual(await find('q=flt9&city=garoua'), []);
+          assert.deepEqual(await find('q=flt9&capability=delivery'), [expressSlug, logiSlug]);
+          assert.deepEqual(await find('q=flt9&capability=storage'), [logiSlug, stockSlug]);
+          assert.deepEqual(await find('q=flt9&capability=storage&capability=delivery'), [logiSlug], 'both together: the hybrid agencies');
+          assert.deepEqual(await find('q=flt9&capability=delivery&capability=storage&city=douala&district=akwa'), [logiSlug]);
+          assert.deepEqual(await find('city=douala&capability=storage&q=logi'), [logiSlug], 'the conditions combine');
+          for (const query of ['', 'q=flt9', 'city=douala', 'capability=delivery', 'city=douala&district=akwa']) {
+            const slugs = await find(`${query}${query ? '&' : ''}limit=50`);
+            for (const hidden of hiddenSlugs) assert.ok(!slugs.includes(hidden), `${hidden} is never revealed by "${query}"`);
+          }
+
+          // What changes shows at the next read: a retired zone, a deactivated site, a suspended capability, a withdrawn fiche.
+          assert.equal((await addZone(logi, ownerAccess, { city: 'Buea', district: 'Molyko' })).status, 201);
+          assert.deepEqual(await find('q=flt9&city=buea&district=molyko'), [logiSlug]);
+          assert.equal((await retireZone(logi, (await zoneRows(logi)).find(zone => zone.district === 'Molyko').id, ownerAccess)).status, 200);
+          assert.deepEqual(await find('q=flt9&city=buea'), [], 'a retired zone is not found');
+          assert.equal((await siteAction(stock, kribiSite.id, 'deactivate', ownerAccess)).status, 200);
+          assert.deepEqual(await find('q=flt9&city=kribi'), [], 'a deactivated site is not found');
+          assert.equal((await siteAction(stock, kribiSite.id, 'reactivate', ownerAccess)).status, 200);
+          assert.deepEqual(await find('q=flt9&city=kribi'), [stockSlug]);
+          assert.equal((await suspend(logi, 'storage', ownerAccess)).status, 200);
+          assert.deepEqual(await find('q=flt9&capability=storage'), [stockSlug], 'a suspended capability does not count');
+          assert.deepEqual(await find('q=flt9&capability=storage&capability=delivery'), [], 'and the agency is not hybrid any more');
+          assert.equal((await enable(logi, 'storage', ownerAccess)).status, 200);
+          assert.deepEqual(await find('q=flt9&capability=storage&capability=delivery'), [logiSlug]);
+          assert.equal((await unpublish(logi, ownerAccess)).status, 200);
+          assert.deepEqual(await find('q=flt9'), [expressSlug, stockSlug], 'a withdrawn fiche leaves the directory at once');
+          assert.equal((await ficheOf(logiSlug)).status, 404);
+          assert.equal((await publish(logi, ownerAccess)).status, 200);
+          assert.deepEqual(await find('q=flt9'), [expressSlug, logiSlug, stockSlug], 'and comes back with its address');
+
+          // Order: alphabetical, without case or accents, then by address.
+          for (const [name, slug] of [['Alpha Tri7', 'alpha-tri7'], ['alpha Beta Tri7', 'alpha-beta-tri7'], ['Éclair Tri7', 'eclair-tri7'], ['Mango Tri7', 'mango-tri7'], ['Mango Tri7', 'mango-tri7-2'], ['Zèbre Tri7', 'zebre-tri7']]) await insertListing({ name, slug });
+          const expectedTri = ['alpha-beta-tri7', 'alpha-tri7', 'eclair-tri7', 'mango-tri7', 'mango-tri7-2', 'zebre-tri7'];
+          assert.deepEqual(await find('q=tri7'), expectedTri, 'accents and case do not move a name; two equal names are told apart by their address');
+          for (const limit of [1, 2, 4]) assert.deepEqual((await traverse('q=tri7', limit)).flatMap(slugsOf), expectedTri, `pages of ${limit}: no duplicate, no gap`);
+
+          // A fiche published between two pages neither repeats nor drops another one.
+          const firstPage = await listed('?q=tri7&limit=2');
+          assert.deepEqual([slugsOf(firstPage), firstPage.hasMore], [['alpha-beta-tri7', 'alpha-tri7'], true]);
+          await publishNew('Aaa Tri7');
+          await publishNew('Yak Tri7');
+          const rest = [];
+          let following = firstPage.nextCursor;
+          while (following !== null) {
+            const page = await listed(`?q=tri7&limit=2&cursor=${following}`);
+            rest.push(...slugsOf(page));
+            following = page.nextCursor;
+          }
+          assert.deepEqual([...slugsOf(firstPage), ...rest], ['alpha-beta-tri7', 'alpha-tri7', 'eclair-tri7', 'mango-tri7', 'mango-tri7-2', 'yak-tri7', 'zebre-tri7'], 'the one before the cursor is not shown again, the one after is, no other is repeated or dropped');
+          assert.deepEqual(await find('q=tri7'), ['aaa-tri7', 'alpha-beta-tri7', 'alpha-tri7', 'eclair-tri7', 'mango-tri7', 'mango-tri7-2', 'yak-tri7', 'zebre-tri7'], 'a new search sees both');
+
+          // Volume: 45 fiches in pages of 20, and the whole directory in pages of 7, against the order of the database.
+          for (let index = 1; index <= 45; index++) await insertListing({ name: `Zz Pagination ${String(index).padStart(2, '0')}`, slug: `zz-pagination-${String(index).padStart(2, '0')}` });
+          await insertListing({ name: 'Zz Pagination 99', slug: 'zz-pagination-99', visible: false });
+          const pages = await traverse('q=zz%20pagination', 20);
+          assert.deepEqual(pages.map(page => page.items.length), [20, 20, 5], 'pages of 20, 20 and 5');
+          assert.deepEqual(pages.map(page => page.hasMore), [true, true, false]);
+          assert.equal(pages[2].nextCursor, null);
+          const paged = pages.flatMap(slugsOf);
+          assert.equal(new Set(paged).size, 45, 'each fiche exactly once');
+          assert.deepEqual(paged, await oracle("name_key LIKE 'zz pagination%'"));
+          assert.equal((await listed('')).items.length, 20, '20 a page by default');
+          const whole = await traverse('', 7);
+          assert.deepEqual(whole.flatMap(slugsOf), await oracle(), 'the whole directory, in the order of the database, once each');
+          assert.ok(whole.every(page => page.items.length <= 7));
+          assert.equal((await listed('?limit=50')).items.length, 50, '50 a page at most');
+
+          // A cursor belongs to the search that made it, and has no other form than the one the API gave.
+          const probe = await listed('?q=flt9&limit=1');
+          assert.equal(probe.hasMore, true);
+          assert.match(probe.nextCursor, /^[A-Za-z0-9_-]+$/, 'an opaque, URL-safe cursor');
+          assert.equal((await directory(`?q=flt9&limit=2&cursor=${probe.nextCursor}`)).status, 200, 'the page size may change between pages');
+          const refusedAs400 = async (query, label) => {
+            const problem = await problemOf(await directory(query), 400, 'HTTP_ERROR', label);
+            assert.ok(problem.traceId);
+            assert.equal(problem.detail, 'The request could not be processed', `${label}: a fixed message, nothing of the request is echoed back`);
+          };
+          const forOther = (await listed('?city=douala&limit=1')).nextCursor;
+          for (const [label, query] of [
+            ['a cursor with characters cut off', `?q=flt9&cursor=${probe.nextCursor.slice(0, -2)}`],
+            ['a cursor with a character added', `?q=flt9&cursor=${probe.nextCursor}A`],
+            ['a cursor with a changed character', `?q=flt9&cursor=${probe.nextCursor.replace(/.$/, probe.nextCursor.endsWith('A') ? 'B' : 'A')}`],
+            ['a cursor with padding', `?q=flt9&cursor=${probe.nextCursor}==`],
+            ['a cursor that is not base64', '?cursor=!!!'],
+            ['an empty cursor', '?cursor='],
+            ['a cursor from another search (text)', `?q=express&cursor=${probe.nextCursor}`],
+            ['a cursor from another search (city)', `?q=flt9&city=douala&cursor=${probe.nextCursor}`],
+            ['a cursor from another search (filters)', `?q=flt9&cursor=${forOther}`],
+            ['a cursor of nonsense', `?cursor=${Buffer.from('["x","y","z"]').toString('base64url')}`],
+            ['a cursor with a bad address', `?q=flt9&cursor=${Buffer.from(JSON.stringify(['["flt9",null,null,[]]', 'a', '../x'])).toString('base64url')}`],
+            ['a very long cursor', `?cursor=${'A'.repeat(5000)}`],
+          ]) await refusedAs400(query, label);
+
+          // Parameters outside the list, and values outside the bounds.
+          for (const [label, query] of [
+            ['agencyId', `?agencyId=${express}`], ['status', '?status=draft'], ['sort', '?sort=createdAt'], ['visible', '?visible=false'], ['zone', '?zone=Akwa'], ['page', '?page=2'], ['an empty unknown parameter', '?x='],
+            ['limit 0', '?limit=0'], ['limit 51', '?limit=51'], ['limit -1', '?limit=-1'], ['limit abc', '?limit=abc'], ['limit 1.5', '?limit=1.5'], ['limit 1e1', '?limit=1e1'], ['an empty limit', '?limit='], ['limit twice', '?limit=1&limit=2'],
+            ['a text of 1 character', '?q=a'], ['an empty text', '?q='], ['a blank text', '?q=%20%20%20'], ['a text of 81 characters', `?q=${'a'.repeat(81)}`], ['a text with U+202E', `?q=${encodeURIComponent('ab‮cd')}`], ['a text with U+200B', `?q=${encodeURIComponent('ab​cd')}`], ['a text with NUL', '?q=ab%00cd'], ['a text with BEL', '?q=ab%07cd'],
+            ['two texts', '?q=ab&q=cd'], ['a text as an object', '?q[a]=b'], ['a city of 1 character', '?city=x'], ['a city with U+202E', `?city=${encodeURIComponent('Dou‮ala')}`], ['a district without a city', '?district=akwa'], ['a district of 1 character', '?city=douala&district=x'],
+            ['capability transport', '?capability=transport'], ['capability hybrid', '?capability=hybrid'], ['capability in capitals', '?capability=Delivery'], ['an empty capability', '?capability='], ['capability list in one value', '?capability=delivery,storage'], ['three capabilities', '?capability=delivery&capability=storage&capability=delivery'], ['capability with brackets', '?capability[]=delivery'],
+          ]) await refusedAs400(query, label);
+          for (const accepted of ['?q=ab', `?q=${'a'.repeat(80)}`, '?limit=1', '?limit=50']) assert.equal((await directory(accepted)).status, 200, `${accepted} is accepted`);
+
+          // One fiche by its address: the same fields for everyone, the prices "from", the notices.
+          const detail = await ficheOf(expressSlug);
+          assert.equal(detail.status, 200);
+          assert.match(detail.headers.get('cache-control'), /no-store/);
+          assert.equal(detail.headers.get('set-cookie'), null);
+          const detailBody = await detail.json();
+          assert.deepEqual(Object.keys(detailBody).sort(), DETAIL_KEYS, 'exactly the closed list of fields');
+          assert.ok(Math.abs(Date.parse(detailBody.publishedAt) - (await listingOf(express)).published_at.getTime()) < 1000, 'the publication date');
+          assert.deepEqual({ ...detailBody, publishedAt: undefined }, {
+            slug: 'express-flt9', tradeName: 'Express Flt9', description: '<b>Promo</b> Livraison 7j/7', verification: 'unverified', capabilities: ['delivery'], hybrid: false,
+            zones: [{ city: 'Douala', district: 'Akwa', startingPrice: 1000 }, { city: 'Douala', district: 'Bonabéri', startingPrice: 1500 }],
+            siteCities: ['Douala'], pricing: { currency: 'XAF', notice: 'indicative_not_guaranteed' }, publishedAt: undefined,
+          }, 'the lowest price of each zone, the notice that prices are not guaranteed without a quote, the description as typed (text, escaped by the client)');
+          for (const [label, headers] of [['a valid token', authHeaders(ownerAccess)], ['an invalid token', { authorization: 'Bearer invalid' }]]) assert.deepEqual(await (await ficheOf(expressSlug, headers)).json(), detailBody, `${label}: the same fiche as a visitor`);
+          const stockBody = await (await ficheOf(stockSlug)).json();
+          assert.deepEqual({ ...stockBody, publishedAt: undefined }, { slug: 'stock-flt9', tradeName: 'Stock Flt9', description: null, verification: 'unverified', capabilities: ['storage'], hybrid: false, zones: [], siteCities: ['Douala', 'Kribi'], pricing: { currency: 'XAF', notice: 'on_quote' }, publishedAt: undefined }, 'a storage agency: no zone, prices on quote, the cities of its sites');
+          const logiBody = await (await ficheOf(logiSlug)).json();
+          assert.deepEqual([logiBody.hybrid, logiBody.pricing.notice, logiBody.zones], [true, 'on_quote', [{ city: 'Douala', district: 'Akwa', startingPrice: null }, { city: 'Yaoundé', district: null, startingPrice: null }]], 'no rate card: every zone on quote; the whole-city zone has no district');
+
+          // Not found, always the same way.
+          const baseline = await problemOf(await ficheOf('unknown-flt9'), 404, 'HTTP_ERROR', 'an unknown address');
+          assert.deepEqual(Object.keys(baseline).sort(), ['code', 'detail', 'instance', 'status', 'title', 'traceId', 'type']);
+          for (const slug of [...hiddenSlugs, 'Express-Flt9', 'Bad%20Slug', 'a', 'x'.repeat(200), '..%2F..%2Fetc%2Fpasswd', '%2e%2e', "x'%20OR%20'1'%3D'1", 'express-flt9%00', 'express-flt9%2F', 'express-flt9%20', '-express', 'express--flt9', encodeURIComponent('express\u202Eflt9')]) {
+            const problem = await problemOf(await ficheOf(slug), 404, 'HTTP_ERROR', `"${slug}" is not found`);
+            assert.deepEqual(withoutTrace(problem), withoutTrace(baseline), `"${slug}": the same answer as an unknown address`);
+          }
+
+          // Nothing was written by all of this.
+          assert.deepEqual([(await agencyPool.query('SELECT count(*)::int AS total FROM identity_audit')).rows[0].total >= auditBefore, (await listingOf(express)).updated_at.toISOString()], [true, updatedBefore], 'reads change no listing');
+
+          // 60 a minute and per address, 429 beyond: against a second instance started with the defaults of production (this run's main instance raised its limits).
+          const { RATE_LIMIT_DEFAULT_PER_MINUTE: _raisedDefault, RATE_LIMIT_PUBLIC_PER_MINUTE: _raisedPublic, ...productionLike } = env;
+          const limited = spawn(process.execPath, ['dist/main.js'], { env: { ...productionLike, PORT: '3109' }, stdio: 'ignore' });
+          try {
+            for (let attempt = 0; attempt < 50; attempt++) {
+              try { await fetch('http://127.0.0.1:3109/api/v1/health/live'); break; } catch { await delay(100); }
+            }
+            const hit = (path, headers = {}) => fetch(`http://127.0.0.1:3109/api/v1/public/agencies${path}`, { headers });
+            for (const [label, path] of [['the directory', '?limit=1'], ['a fiche', `/${expressSlug}`]]) {
+              for (let count = 1; count <= 60; count++) {
+                const response = await hit(path);
+                assert.equal(response.status, 200, `${label}: request ${count} of 60 is served`);
+                await response.arrayBuffer();
+              }
+              const refused = await hit(path);
+              await problemOf(refused, 429, 'HTTP_ERROR', `${label}: the 61st request in the minute is refused`);
+              assert.ok(refused.headers.get('retry-after'), `${label}: the refusal says when to come back`);
+              await problemOf(await hit(path, { 'x-forwarded-for': '203.0.113.9' }), 429, 'HTTP_ERROR', `${label}: a forwarded address buys no new budget`);
+            }
+          } finally { limited.kill('SIGTERM'); }
+
+          // Cleanup of the fiches written straight into the projection.
+          await agencyPool.query('DELETE FROM public_agency_listings WHERE agency_id = ANY($1)', [inserted]);
+          await agencyPool.query('DELETE FROM agency_public_profiles WHERE agency_id = ANY($1)', [inserted]);
+        }
         await agencyPool.query("UPDATE agencies SET trade_name = 'Configuration Express' WHERE id = ANY($1)", [[...mine, fiche]]);
         activeOne = previousActive;
       }
@@ -2154,7 +2460,7 @@ const { Client } = require('pg');
       '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/public-profile', '/api/v1/agencies/{agencyId}/public-profile/publish', '/api/v1/agencies/{agencyId}/public-profile/unpublish', '/api/v1/agencies/{agencyId}/quotes', '/api/v1/agencies/{agencyId}/quotes/preview', '/api/v1/agencies/{agencyId}/quotes/{quoteId}', '/api/v1/agencies/{agencyId}/quotes/{quoteId}/accept', '/api/v1/agencies/{agencyId}/rate-card', '/api/v1/agencies/{agencyId}/rate-card/versions', '/api/v1/agencies/{agencyId}/rate-card/versions/{number}', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/submit', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
       '/api/v1/agency-invitations/accept',
       '/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/auth/refresh', '/api/v1/auth/register',
-      '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies',
+      '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies', '/api/v1/public/agencies', '/api/v1/public/agencies/{slug}',
     ], 'public route set is the documented one');
     const { JWT_SECRET: _unused, ...unsignedEnv } = env;
     const unsigned = spawn(process.execPath, ['dist/main.js'], { env: { ...unsignedEnv, PORT: '3108' }, stdio: 'ignore' });

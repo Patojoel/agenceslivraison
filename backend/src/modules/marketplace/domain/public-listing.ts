@@ -1,5 +1,6 @@
 import { AgencyPublicView, PublicCapability } from './agency-public-view';
 import { PublicProfileSnapshot } from './agency-public-profile';
+import { areaKeyOf, comparisonKeyOf, singleLineOf } from './comparison-key';
 import { obstaclesOf } from './publication-rules';
 
 export interface PublicListingZone {
@@ -27,20 +28,24 @@ export interface PublicListing {
   readonly capabilities: readonly PublicCapability[];
   readonly zones: readonly PublicListingZone[];
   readonly siteCities: readonly string[];
+  /** Search key, never shown: the cities (comparison form) of the active zones and sites. What the city filter reads. */
+  readonly cityKeys: readonly string[];
+  /** Search key, never shown: one per active zone, its city and its district (empty for a whole city). What the district filter reads. */
+  readonly districtKeys: readonly string[];
   readonly publishedAt: Date;
   readonly visible: boolean;
 }
 
-function singleLine(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
+function keyOf(text: string): string {
+  return comparisonKeyOf(singleLineOf(text));
 }
 
-function keyOf(text: string): string {
-  return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+function distinctSorted(keys: Iterable<string>): string[] {
+  return [...new Set(keys)].sort();
 }
 
 export function composePublicListing(profile: PublicProfileSnapshot, view: AgencyPublicView, startingPrices: ReadonlyMap<string, number>): PublicListing {
-  const name = singleLine(view.tradeName);
+  const name = singleLineOf(view.tradeName);
   const zones = [...view.zones]
     .sort((left, right) => keyOf(left.city).localeCompare(keyOf(right.city)) || keyOf(left.district ?? '').localeCompare(keyOf(right.district ?? '')) || left.id.localeCompare(right.id))
     .map(zone => ({ id: zone.id, city: zone.city, district: zone.district, startingPrice: startingPrices.get(zone.id) ?? null }));
@@ -48,12 +53,14 @@ export function composePublicListing(profile: PublicProfileSnapshot, view: Agenc
     agencyId: profile.agencyId.value,
     slug: profile.slug.value,
     name,
-    nameKey: keyOf(name),
+    nameKey: comparisonKeyOf(name),
     description: view.description,
     verification: 'unverified',
     capabilities: [...view.capabilities].sort(),
     zones,
     siteCities: [...view.siteCities],
+    cityKeys: distinctSorted([...view.zones.map(zone => keyOf(zone.city)), ...view.siteCities.map(keyOf)]),
+    districtKeys: distinctSorted(view.zones.map(zone => areaKeyOf(keyOf(zone.city), zone.district === null ? '' : keyOf(zone.district)))),
     publishedAt: profile.publishedAt,
     visible: profile.published && obstaclesOf(profile.agencyId.value, view).length === 0,
   };

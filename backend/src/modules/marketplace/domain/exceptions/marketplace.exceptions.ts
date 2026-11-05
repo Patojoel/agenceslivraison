@@ -43,3 +43,13 @@ export class ProfileNotPublished extends DomainException {
 export class PublicSlugUnavailable extends DomainException {
   constructor() { super('conflict', 'No public address is available for this name', { code: 'PUBLIC_SLUG_UNAVAILABLE' }); }
 }
+
+/** A search parameter or a cursor of the public directory that the request must not carry: 400, nothing echoed back. */
+export class InvalidPublicSearch extends DomainException {
+  constructor() { super('invalid', 'Invalid search parameters'); }
+}
+
+/** Unknown, malformed, withdrawn, hidden or not yet published: all look the same to a visitor. */
+export class PublicAgencyNotFound extends DomainException {
+  constructor() { super('not_found', 'Agency not found'); }
+}
