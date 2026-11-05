@@ -21,7 +21,7 @@ Tableau de bord vivant du projet. Le détail de chaque tâche (règles, endpoint
 | Lot backend courant | B3 — tarifs, zones, marketplace publique : S2 validé (2026-11-04, 5 tranches) ; tranche 1 en cours |
 | Branche | `refactor/architecture-normalisee` |
 | Mode de session | light (session du 2026-11-03) |
-| Tâches en cours | `[~]` B3.S9 — revue `security-reviewer` du lot B3 (tranches 1 à 5) |
+| Tâches en cours | `[~]` B3.16 + B3.17 + B3.18 — durcissements avant clôture du lot B3 (`back-builder`) |
 
 ### Refactor architecture + TypeORM — commité (2026-11-03)
 Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranchée en faveur de TypeORM et de l'architecture normalisée. `CLAUDE.md`, les agents (`back-builder`, `archi-reviewer`, `query-perf`), `phases.md` et `backend/docs/` sont alignés. Décision et conventions : [docs/architecture/](docs/architecture/).
@@ -35,7 +35,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | B0 | Socle technique | terminé (sauvegarde à valider en cible) | 11/12 |
 | B1 | Identité, sessions, memberships | terminé, re-vérifié après refactor (rate limit partagé et constats de revue B1.13–B1.14 à traiter) | 11/14 |
 | B2 | Onboarding agence | **terminé** (S1–S10) ; durcissements B2.13 et B2.15 livrés en tranche 1 de B3 | 15/15 |
-| B3 | Tarifs, zones, marketplace publique | en cours (S1–S8 faits, tranches 1 à 5 ; S9 revue sécurité en cours, S10 à faire) | 15/16 |
+| B3 | Tarifs, zones, marketplace publique | en cours (S1–S9 faits ; durcissements B3.16–B3.18 en cours, puis S10) | 15/18 |
 | B4 | Clients, commerçants, demandes | à faire | 0/14 |
 | B5 | Commandes, colis, suivi | à faire | 0/17 |
 | B6 | Livreurs, missions | à faire | 0/18 |
@@ -111,7 +111,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [x] B2.15 *(contre-revue sécurité, durcissement, tranche 1 de B3)* droits en `Record<AgencyRole, boolean>` exhaustif (`managesAgencyIdentity`, `submitsAgency`, `canInvite`, `canManage`), test sur `AGENCY_ROLES` et rôle inconnu
 
 ### B3 — Tarifs, zones, marketplace publique (CRITIQUE)
-Étapes : [x] S1 use cases (12 UC, 138 scénarios, 128 tests prévus ; `docs/use-cases/05-tarifs-zones/`, `docs/use-cases/03-marketplace-publique/` ; UC-05-01 et UC-05-03 complètent UC-02-03, D-15) · [x] S2 plan validé (2026-11-04, 5 tranches : 1) B2.13 + B2.15 + B3.2 ; 2) B3.4 + B3.5 + B3.14 + B3.6 + compléments B3.1, B3.3 ; 3) B3.7 + B3.8 + B3.15 ; 4) B3.9 ; 5) B3.10 à B3.13) · [x] S3–S8 (tranches 1 à 5 faites) · [~] S9 (`security-reviewer` du lot, tranches 1 à 5) · [ ] S10
+Étapes : [x] S1 use cases (12 UC, 138 scénarios, 128 tests prévus ; `docs/use-cases/05-tarifs-zones/`, `docs/use-cases/03-marketplace-publique/` ; UC-05-01 et UC-05-03 complètent UC-02-03, D-15) · [x] S2 plan validé (2026-11-04, 5 tranches : 1) B2.13 + B2.15 + B3.2 ; 2) B3.4 + B3.5 + B3.14 + B3.6 + compléments B3.1, B3.3 ; 3) B3.7 + B3.8 + B3.15 ; 4) B3.9 ; 5) B3.10 à B3.13) · [x] S3–S8 (tranches 1 à 5 faites) · [x] S9 (`security-reviewer` 2026-11-05 : aucun critique ni à corriger ; 4 durcissements → B3.17, B3.18, B10.7, B10.19 ; notes → B10.4/B10.5, D-28, D-29 ; pas d'`archi-reviewer`, mode light) · [ ] S10
 - [x] B3.1 Créer zone — déjà livrée par B2.3 (D-15) ; complément B3 : zone sans ligne → `no_tariff` en simulation, sans erreur (E2E)
 - [x] B3.2 Modifier zone — `PATCH /agencies/{id}/zones/{zoneId}` (module `agencies`, D-25 : même identifiant, dernière correction gagnante), événement `ServiceZoneRenamed` audité (`resource_id`, noms de champs), 409 `ZONE_ALREADY_SERVED` / `ZONE_RETIRED_DUPLICATE` / `ZONE_RETIRED`, concurrence testée en E2E, aucune migration
 - [x] B3.3 Désactiver zone — retrait livré par B2.3 ; complément B3 : zone retirée non simulable ni versionnable (409 `ZONE_RETIRED`), lignes conservées et de nouveau valables à la réactivation (E2E)
@@ -128,6 +128,8 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [x] B3.14 *(ajoutée le 2026-11-04, anomalie A-35 des use cases)* Lire la grille et l'historique — `GET /agencies/{id}/rate-card`, `…/versions` (curseur, résumés), `…/versions/{number}`
 - [x] B3.15 *(ajoutée le 2026-11-04, anomalie A-35 des use cases)* Lister et consulter les devis — `GET /agencies/{id}/quotes` (curseur opaque, résumés sans téléphone, index vérifié par EXPLAIN), `GET …/quotes/{quoteId}`
 - [ ] B3.16 *(ajoutée le 2026-11-05, tranche 5)* E2E instable vu une fois : `test/e2e.cjs:1342` (`200 !== 201`, « the next version », course de versionnement de grille) — à reproduire et rendre déterministe
+- [ ] B3.17 *(revue sécurité, durcissement)* Sérialiser la publication et le retrait de la fiche avec les écritures de `pricing` (verrou d'agence exclusif vis-à-vis de `FOR SHARE`, ou verrou consultatif de projection) : sinon une 1re publication concurrente d'une nouvelle version de grille laisse un prix « à partir de » périmé ; E2E de concurrence ; corriger le commentaire de `public-listing-projection.subscriber.ts`
+- [ ] B3.18 *(revue sécurité, durcissement)* `Cache-Control: no-store` et `X-Content-Type-Options: nosniff` sur les réponses Problem Details (au minimum routes publiques) ; E2E sur un 404 et un 400 publics
 
 ### B4 — Clients, commerçants, demandes (CRITIQUE)
 Étapes : [ ] S1 · [ ] S2 · [ ] S3 · [ ] S4 · [ ] S5 · [ ] S6 · [ ] S7 · [ ] S8 · [ ] S9 · [ ] S10
@@ -242,10 +244,10 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [ ] B10.1 Rôle admin plateforme
 - [ ] B10.2 Examiner agence
 - [ ] B10.3 Demander justificatif
-- [ ] B10.4 Approuver / rejeter
-- [ ] B10.5 Suspendre
+- [ ] B10.4 Approuver / rejeter — *(revue B3)* les statuts approuvée, rejetée, suspendue doivent émettre des événements écoutés par la projection publique et redéfinir « publiable » (aujourd'hui `status === 'submitted'`) ; test « agence suspendue invisible »
+- [ ] B10.5 Suspendre — *(revue B3)* voir B10.4 : agence suspendue retirée de l'annuaire
 - [ ] B10.6 Restaurer
-- [ ] B10.7 Modérer profil
+- [ ] B10.7 Modérer profil — *(revue B3)* refuser dans les noms `Zl`, `Zp`, les caractères de remplissage (U+115F, U+1160, U+3164, U+FFA0, U+2800) et les accents combinants empilés ; modération des noms confusables
 - [ ] B10.8 Consulter audit
 - [ ] B10.9 KPI agence
 - [ ] B10.10 Volumes
@@ -257,7 +259,7 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 - [ ] B10.16 Règles reporting
 - [ ] B10.17 Mesures de performance
 - [ ] B10.18 Revue sécurité, correlationId (inclut `lock_timeout` dans `migrate.ts`, index sur `identity_audit.resource_id` quand l'audit sera consulté en B10.8, et B0.12 R5 : ne journaliser d'un `QueryFailedError` que code, contrainte et `traceId`)
-- [ ] B10.19 Rate limit partagé, RLS évaluée
+- [ ] B10.19 Rate limit partagé, RLS évaluée — *(revue B3)* **bloquant avant tout déploiement derrière un proxy ou un CDN** (un seul client sature l'annuaire public) ; quotas par agence sur les devis et les versions de grille
 - [ ] B10.20 Sauvegarde validée en cible
 - [ ] B10.21 *(ajoutée le 2026-11-04)* Purge des `idempotency_keys` selon la rétention décidée (D-16)
 
@@ -361,6 +363,8 @@ Le refactor signalé plus tôt est terminé et commité (`293a35b`) : D-01 tranc
 | D-12 | Détecter une migration TypeORM modifiée après application (empreinte par migration) ; afficher ou non au migrateur le motif d'un refus d'adoption Drizzle (message sans donnée) | B10.18 | ouverte |
 | D-26 | Plafonds de l'agence (hypothèses de B2.13 : 300 zones au total, 50 sites actifs, 200 sites au total) ; données existantes contenant des caractères désormais refusés (`p{Cf}`, `Cc` 0x80–0x9F) : la réhydratation échouerait — requête de détection avant déploiement, puis migration de nettoyage ou réhydratation tolérante | B10.18 (avant toute base de production) | ouverte (aucune base de production à ce jour) |
 | D-27 | Historique des versions de grille : résumés dans la liste et barème complet par version (hypothèse appliquée) ou barème complet dans la liste | F1.5 | ouverte (défaut appliqué) |
+| D-28 | Conservation et suppression des destinataires de devis (nom, téléphone), cohérence avec D-16 : l'empreinte d'idempotence est un SHA-256 sans sel incluant nom et téléphone → purger `idempotency_keys` au plus tard avec les devis, ou passer à un HMAC à clé secrète | B4 (données personnelles), B10.21 | ouverte |
+| D-29 | Fiche publique : masquer les zones et prix de livraison quand la capacité livraison est suspendue (seul le stockage actif) ? Aujourd'hui ils restent affichés | F2.4 | ouverte |
 
 Décisions prises :
 - 2026-11-05 — **Plan B3 appliqué à B3.9** : la projection de l'annuaire est reconstruite in-process dans la transaction de l'action (un échec annule l'action d'`agencies` ou de `pricing`) ; écart assumé à la règle « événement d'intégration après commit » de `backend/docs/events.md`, mise à jour en conséquence.
@@ -389,6 +393,7 @@ Décisions prises :
 
 | Date | Acteur | Tâche | Résultat | Commandes exécutées |
 |---|---|---|---|---|
+| 2026-11-05 | `security-reviewer` (mode light, rapport appliqué par la session principale) | B3.S9 — revue sécurité du lot B3 (`db32107`…`2539d2a`) | Aucun critique ni à corriger ; routes publiques, projection (liste fermée, verrous), isolation et droits, devis (idempotence, acceptation), migrations, secrets et audit jugés sains ; 4 durcissements (B3.17 course 1re publication contre grille, B3.18 en-têtes des erreurs, noms confusables → B10.7, quotas → B10.19) ; notes B10.4/B10.5, D-26 confirmée ; D-28 et D-29 ouvertes ; tâches B3.17 et B3.18 ajoutées (plan modifié, `phases.md` mis à jour) | `git diff 6857f28 2539d2a -- backend`, lecture du code, des migrations, du throttler et de `test/e2e.cjs` ; 27 cas limites exécutés via `node --import tsx` ; `npm audit --omit=dev` 0 ; aucun test relancé |
 | 2026-11-05 | `query-perf` (mode light, rapport appliqué par la session principale) | B3 tranche 5 — B3.10 à B3.13 | Vert ; 2 routes publiques (lecture de la seule projection `public_agency_listings`, vérifié par la session principale), migration `1793900000000-public-listing-search-keys`, aucun nouvel index (mesures sur 2 000 et 20 000 lignes) ; limites de débit configurables (`RATE_LIMIT_*`, plafonnées en production), attente de 61 s de l'E2E supprimée, 429 vérifié sur une instance aux valeurs par défaut ; E2E rouge constaté (`404 !== 200`), rouge non constaté pour deux value objects unitaires ; E2E instable préexistant vu une fois → B3.16 ; hypothèses à confirmer avant F2.3 : `district` sans paramètre `zone`, `capability` répétable, `no-store` | `npm run lint` OK · `npm run typecheck` OK · `npm test` 451/451 (relancé par la session principale) · `npm run build` OK (relancé) · `migration:check` « No changes » · `npm audit --omit=dev` 0 · E2E Docker exit 0 · `compose down` |
 | 2026-11-05 | `back-builder` (mode light, rapport appliqué par la session principale) | B3 tranche 4 — B3.9 (fiche publique et projection de l'annuaire) | Vert après reprise (arrêt du watchdog pendant la mise au point de l'E2E, état intact) ; nouveau module `marketplace` (agrégat `AgencyPublicProfile`, slug stable jamais réattribué, projection `public_agency_listings`) ; lecteurs exposés par `agencies` (`publicViewOf`, contrat d'événements) et `pricing` (`PublicPricingReader`), aucun import interne vérifié par la session principale ; 3 routes ; migration `1793862767576-marketplace-public-profile` ; rouges constatés en unitaire et en E2E écrit avant le contrôleur ; annulation de l'action sur échec de la projection testée ; E2E : attente de 61 s ajoutée à cause de la limite globale du Throttler (à remplacer en tranche 5) | `npm run lint` OK · `npm run typecheck` OK · `npm test` 426/426 (relancé par la session principale) · `npm run build` OK (relancé) · `migration:check` « No changes » · E2E Docker exit 0 puis `down` · `npm audit --omit=dev` 0 |
 | 2026-11-04 | `back-builder` (mode light, rapport appliqué par la session principale) | B3 tranche 3 — B3.7 + B3.8 + B3.15 (devis) et reprises de la tranche 2 | Vert ; 4 routes de devis ; migration `1793809498779-quotes` (`quotes` avec 18 CHECK et clé étrangère composite vers `service_zones`, `quote_sequences`) ; rouges constatés en unitaire et en E2E écrit avant le code HTTP (`404 !== 409`) ; concurrence testée (acceptations, émissions, clé d'idempotence, acceptation contre retrait de zone) ; EXPLAIN de la liste ; reprise a faite (`agency-access.contract.ts`, API publique d'`agencies`), reprise b gardée (`version:<n>` dans `details.fields`, historique d'audit non réécrit) ; à noter pour B4 : les devis portent nom et téléphone du destinataire (conservation et suppression des données personnelles à décider) | `npm run lint` OK · `npm run typecheck` OK · `npm test` 367/367 (relancé par la session principale) · `npm run build` OK (relancé) · `migration:check` « No changes » · E2E Docker exit 0 · `npm audit --omit=dev` 0 |
