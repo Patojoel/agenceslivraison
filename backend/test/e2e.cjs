@@ -1315,7 +1315,8 @@ const { Client } = require('pg');
         assert.equal((await (await readCard(cardAgency, ownerAccess)).json()).version.number, 2, 'refusals keep the version in force');
         assert.deepEqual(await cardRows(cardAgency), { cards: 1, versions: 2, lines: 10 });
 
-        // Concurrency: two versions based on the same one, only one wins.
+        // Concurrency: two versions based on the same one, only one wins. Version 3 is 1300 or 1400 depending on who wins, so the
+        // next version below uses 1450, which neither has: an identical scale would answer 200 and create no version (B3.16).
         const raceVersions = await Promise.all([publishCard(cardAgency, ownerAccess, scaleOf(1300), '"2"'), publishCard(cardAgency, adminAccess, scaleOf(1400), '"2"')]);
         assert.deepEqual(raceVersions.map(response => response.status).sort(), [201, 409], 'one of the simultaneous versions wins');
         const loser = raceVersions.find(response => response.status === 409);
@@ -1338,8 +1339,8 @@ const { Client } = require('pg');
           await problemOf(raceZone[0], 409, 'ZONE_RETIRED', 'a version after the retirement is refused');
         }
         const nextBase = raceZone[0].status === 201 ? 4 : 3;
-        if (nextBase === 4) assert.equal((await publishCard(cardAgency, ownerAccess, scaleOf(1400), '"4"')).status, 201, 'a version without the retired zone');
-        else assert.equal((await publishCard(cardAgency, ownerAccess, scaleOf(1400), '"3"')).status, 201, 'the next version');
+        if (nextBase === 4) assert.equal((await publishCard(cardAgency, ownerAccess, scaleOf(1450), '"4"')).status, 201, 'a version without the retired zone');
+        else assert.equal((await publishCard(cardAgency, ownerAccess, scaleOf(1450), '"3"')).status, 201, 'the next version');
         const latest = nextBase + 1;
 
         // The history: most recent first, a version for each effective publication, in pages.
@@ -2373,6 +2374,26 @@ const { Client } = require('pg');
           // Cleanup of the fiches written straight into the projection.
           await agencyPool.query('DELETE FROM public_agency_listings WHERE agency_id = ANY($1)', [inserted]);
           await agencyPool.query('DELETE FROM agency_public_profiles WHERE agency_id = ANY($1)', [inserted]);
+        }
+        // B3.17: a first publication and a new version of the rate card, simultaneous: the directory ends on the prices in force.
+        {
+          const prices = (agency) => agencyPool.query('SELECT l.zone_id, MIN(l.price_xaf)::int AS price FROM rate_card_lines l JOIN rate_cards c ON c.agency_id = l.agency_id AND c.current_version = l.version_number WHERE l.agency_id = $1 GROUP BY l.zone_id', [agency]).then(result => new Map(result.rows.map(row => [row.zone_id, row.price])));
+          for (let round = 1; round <= 12; round++) {
+            const agency = await submittedAgency(`Course Publication ${round}`);
+            const [akwa] = await zoneRows(agency);
+            const tiersOf = (first) => ({ lines: [{ zoneId: akwa.id, tiers: [{ upTo: '1 kg', price: first }, { upTo: '5 kg', price: 1500 }] }] });
+            assert.equal((await act('POST', `${agency}/rate-card`, ownerAccess, tiersOf(1000))).status, 201);
+            const [published, versioned] = await Promise.all([
+              publish(agency, ownerAccess),
+              act('POST', `${agency}/rate-card/versions`, ownerAccess, tiersOf(700), { 'if-match': '"1"' }),
+            ]);
+            assert.equal(published.status, 200, `round ${round}: the first publication`);
+            assert.equal(versioned.status, 201, `round ${round}: the new version`);
+            const inForce = await prices(agency);
+            assert.equal(inForce.get(akwa.id), 700, `round ${round}: version 2 is in force`);
+            const listing = await listingOf(agency);
+            assert.deepEqual(listing.zones.map(zone => [zone.id, zone.startingPrice]), [[akwa.id, inForce.get(akwa.id)]], `round ${round}: the directory shows the prices in force`);
+          }
         }
         await agencyPool.query("UPDATE agencies SET trade_name = 'Configuration Express' WHERE id = ANY($1)", [[...mine, fiche]]);
         activeOne = previousActive;
