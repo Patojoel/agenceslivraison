@@ -25,6 +25,7 @@ import { READ_AGENCY_ONBOARDING_REPOSITORY } from './application/ports/read-agen
 import { READ_AGENCY_MEMBER_REPOSITORY } from './application/ports/read-agency-member.repository';
 import { READ_AGENCY_MEMBERSHIP_REPOSITORY } from './application/ports/read-agency-membership.repository';
 import { READ_AGENCY_DELIVERY_REPOSITORY } from './application/ports/read-agency-delivery.repository';
+import { READ_AGENCY_PUBLIC_VIEW_REPOSITORY } from './application/ports/read-agency-public-view.repository';
 import { AgencyAccessReader } from './application/queries/agency-access/agency-access.reader';
 import { ListAgencyMembersHandler } from './application/queries/list-agency-members/list-agency-members.handler';
 import { GetAgencyHandler } from './application/queries/get-agency/get-agency.handler';
@@ -46,6 +47,7 @@ import { ReadAgencyOnboardingTypeOrmRepository } from './infrastructure/persiste
 import { ReadAgencyMemberTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-member.typeorm.repository';
 import { ReadAgencyMembershipTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-membership.typeorm.repository';
 import { ReadAgencyDeliveryTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-delivery.typeorm.repository';
+import { ReadAgencyPublicViewTypeOrmRepository } from './infrastructure/persistence/typeorm/read-agency-public-view.typeorm.repository';
 import { AgencyCapabilityController } from './presentation/http/agency-capability.controller';
 import { AgencySiteController } from './presentation/http/agency-site.controller';
 import { AgencyController } from './presentation/http/agency.controller';
@@ -68,6 +70,7 @@ import { ServiceZoneController } from './presentation/http/service-zone.controll
     { provide: READ_SERVICE_ZONE_REPOSITORY, useClass: ReadServiceZoneTypeOrmRepository },
     { provide: READ_AGENCY_SITE_REPOSITORY, useClass: ReadAgencySiteTypeOrmRepository },
     { provide: READ_AGENCY_DELIVERY_REPOSITORY, useClass: ReadAgencyDeliveryTypeOrmRepository },
+    { provide: READ_AGENCY_PUBLIC_VIEW_REPOSITORY, useClass: ReadAgencyPublicViewTypeOrmRepository },
     AgencyAccessReader,
     CreateAgencyHandler,
     UpdateAgencyIdentityHandler,

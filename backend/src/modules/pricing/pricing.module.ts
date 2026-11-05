@@ -8,7 +8,9 @@ import { IssueQuoteHandler } from './application/commands/issue-quote/issue-quot
 import { PublishRateCardVersionHandler } from './application/commands/publish-rate-card-version/publish-rate-card-version.handler';
 import { AGENCY_ACCESS } from './application/ports/agency-access.port';
 import { READ_QUOTE_REPOSITORY } from './application/ports/read-quote.repository';
+import { READ_PUBLIC_PRICING_REPOSITORY } from './application/ports/read-public-pricing.repository';
 import { READ_RATE_CARD_REPOSITORY } from './application/ports/read-rate-card.repository';
+import { PublicPricingReader } from './application/queries/public-pricing/public-pricing.reader';
 import { GetQuoteHandler } from './application/queries/get-quote/get-quote.handler';
 import { GetRateCardVersionHandler } from './application/queries/get-rate-card-version/get-rate-card-version.handler';
 import { GetRateCardHandler } from './application/queries/get-rate-card/get-rate-card.handler';
@@ -22,6 +24,7 @@ import { AgenciesAgencyAccess } from './infrastructure/agencies/agencies-agency-
 import { QuoteTypeOrmRepository } from './infrastructure/persistence/typeorm/quote.typeorm.repository';
 import { RateCardTypeOrmRepository } from './infrastructure/persistence/typeorm/rate-card.typeorm.repository';
 import { ReadQuoteTypeOrmRepository } from './infrastructure/persistence/typeorm/read-quote.typeorm.repository';
+import { ReadPublicPricingTypeOrmRepository } from './infrastructure/persistence/typeorm/read-public-pricing.typeorm.repository';
 import { ReadRateCardTypeOrmRepository } from './infrastructure/persistence/typeorm/read-rate-card.typeorm.repository';
 import { QuoteController } from './presentation/http/quote.controller';
 import { QuotePreviewController } from './presentation/http/quote-preview.controller';
@@ -37,6 +40,8 @@ import { RateCardController } from './presentation/http/rate-card.controller';
     { provide: READ_RATE_CARD_REPOSITORY, useClass: ReadRateCardTypeOrmRepository },
     { provide: QUOTE_REPOSITORY, useClass: QuoteTypeOrmRepository },
     { provide: READ_QUOTE_REPOSITORY, useClass: ReadQuoteTypeOrmRepository },
+    { provide: READ_PUBLIC_PRICING_REPOSITORY, useClass: ReadPublicPricingTypeOrmRepository },
+    PublicPricingReader,
     CreateRateCardHandler,
     PublishRateCardVersionHandler,
     GetRateCardHandler,
@@ -49,6 +54,8 @@ import { RateCardController } from './presentation/http/rate-card.controller';
     ListQuotesHandler,
     PricingAuditSubscriber,
   ],
+  /** What other modules may read of the pricing of an agency; they never reach its tables, repositories or handlers. */
+  exports: [PublicPricingReader],
 })
 export class PricingModule implements OnModuleInit {
   constructor(private readonly publisher: InProcessDomainEventPublisher, private readonly audit: PricingAuditSubscriber) {}

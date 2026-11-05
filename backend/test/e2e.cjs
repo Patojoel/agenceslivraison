@@ -1821,6 +1821,257 @@ const { Client } = require('pg');
         activeOne = previousActive;
       }
 
+      // B3.9: publishing and withdrawing the public fiche, and the projection the directory reads.
+      {
+        const previousActive = activeOne;
+        // The zone routes were called about a hundred times by the blocks above: wait for a fresh window of the global rate limit (120 a minute and per route).
+        await delay(61000);
+        const mine = [];
+        const rejectsOnDatabase = (work, pattern, message) => assert.rejects(work, pattern, message);
+        const publish = (agency, access, body) => act('POST', `${agency}/public-profile/publish`, access, body);
+        const unpublish = (agency, access, body) => act('POST', `${agency}/public-profile/unpublish`, access, body);
+        const readProfile = (agency, access) => act('GET', `${agency}/public-profile`, access);
+        const listingOf = async (agency) => (await agencyPool.query('SELECT * FROM public_agency_listings WHERE agency_id = $1', [agency])).rows[0];
+        const profileOf = async (agency) => (await agencyPool.query('SELECT * FROM agency_public_profiles WHERE agency_id = $1', [agency])).rows[0];
+        const marketTrail = async (agency) => (await agencyPool.query("SELECT action, user_id, resource_id, details FROM identity_audit WHERE agency_id = $1 AND action ~ '^marketplace\\.' ORDER BY occurred_at, id", [agency])).rows;
+        const setName = (agency, name) => agencyPool.query('UPDATE agencies SET trade_name = $2 WHERE id = $1', [agency, name]);
+        const patchZoneOf = (agency, zone, access, body) => act('PATCH', `${agency}/zones/${zone}`, access, body);
+        const NEVER_PUBLISHED = { published: false, slug: null, publishedAt: null, unpublishedAt: null, visible: false, verification: 'unverified', obstacles: [] };
+        /** A submitted agency (delivery active, Akwa and Bonabéri served, one site in Douala, identity filled), through the real routes. */
+        const submittedAgency = async (name, { bonaberi = false } = {}) => {
+          const agency = await prepared();
+          mine.push(agency);
+          assert.equal((await patchAgency(`${agency}/identity`, ownerAccess, { rccm: 'RC/DLA/2024/B/1234', niu: 'M012345678901A', contactEmail: 'contact@express.example' }, await versionOf(agency))).status, 200);
+          if (bonaberi) assert.equal((await addZone(agency, ownerAccess, { city: 'Douala', district: 'Bonabéri' })).status, 201);
+          await setName(agency, name);
+          assert.equal((await submit(agency, ownerAccess)).status, 200);
+          return agency;
+        };
+
+        const fiche = await submittedAgency('Fiche Express Douala', { bonaberi: true });
+        activeOne = fiche;
+        const akwaRow = (await zoneRows(fiche)).find(zone => zone.district === 'Akwa');
+        const bonaRow = (await zoneRows(fiche)).find(zone => zone.district === 'Bonabéri');
+        assert.ok(akwaRow && bonaRow);
+
+        // Nothing is published, nothing is projected, whatever the agency has done so far.
+        assert.equal(await profileOf(fiche), undefined);
+        assert.equal(await listingOf(fiche), undefined, 'an agency that never published has no listing');
+
+        // Isolation, rights and shape of the request, before anything is written.
+        await assertHidden('publish the fiche', 'POST', agency => `${agency}/public-profile/publish`);
+        await assertHidden('withdraw the fiche', 'POST', agency => `${agency}/public-profile/unpublish`);
+        await assertHidden('read the fiche state', 'GET', agency => `${agency}/public-profile`);
+        for (const [who, access] of [['an administrator', adminAccess], ['an agent', agentAccess]]) {
+          await problemOf(await publish(fiche, access), 403, undefined, `${who} cannot publish`);
+          await problemOf(await unpublish(fiche, access), 403, undefined, `${who} cannot withdraw`);
+        }
+        for (const body of [{ status: 'published' }, { slug: 'mine' }, { agencyId: unknownAgency }, { visible: true }]) {
+          assert.equal((await publish(fiche, ownerAccess, body)).status, 400, `a body is refused: ${JSON.stringify(body)}`);
+          assert.equal((await unpublish(fiche, ownerAccess, body)).status, 400, `a body is refused: ${JSON.stringify(body)}`);
+        }
+        assert.deepEqual([await profileOf(fiche), await listingOf(fiche), await marketTrail(fiche)], [undefined, undefined, []], 'refusals changed nothing');
+        for (const access of [ownerAccess, adminAccess, agentAccess]) {
+          const state = await readProfile(fiche, access);
+          assert.equal(state.status, 200, 'every active member reads the state');
+          assert.match(state.headers.get('cache-control'), /no-store/);
+          assert.deepEqual(await state.json(), NEVER_PUBLISHED);
+        }
+        await problemOf(await unpublish(fiche, ownerAccess), 409, 'PROFILE_NOT_PUBLISHED', 'a fiche never published cannot be withdrawn');
+
+        // What prevents a publication: each one is a conflict, listed by the state, and writes nothing.
+        const refused = async (agency, code, obstacle, message) => {
+          await problemOf(await publish(agency, ownerAccess), 409, code, message);
+          assert.deepEqual((await (await readProfile(agency, ownerAccess)).json()).obstacles, obstacle, `${message}: the state says why`);
+          assert.deepEqual([await profileOf(agency), await listingOf(agency), await marketTrail(agency)], [undefined, undefined, []], `${message}: nothing written`);
+        };
+        const draft = await prepared();
+        mine.push(draft);
+        await refused(draft, 'AGENCY_NOT_SUBMITTED', ['agency_not_submitted'], 'a draft');
+        const provisional = await submittedAgency('placeholder');
+        await agencyPool.query("UPDATE agencies SET trade_name = 'Agence ' || substr(id::text, 1, 8) WHERE id = $1", [provisional]);
+        await refused(provisional, 'PROVISIONAL_TRADE_NAME', ['provisional_trade_name'], 'the provisional name');
+        const lookalike = await submittedAgency('Agence 3f9a1c2e');
+        assert.equal((await publish(lookalike, ownerAccess)).status, 200, 'a name that is the provisional one of another agency only is publishable');
+        assert.equal((await profileOf(lookalike)).slug, 'agence-3f9a1c2e');
+        for (const [label, name] of [['U+202E', 'Fiche‮Express'], ['U+200B', 'Fiche​Express'], ['U+FEFF', 'Fiche﻿Express'], ['no address', '!!']]) {
+          const unsafe = await submittedAgency('placeholder');
+          await setName(unsafe, name);
+          await refused(unsafe, 'TRADE_NAME_NOT_PUBLISHABLE', ['trade_name_not_publishable'], `a name with ${label}`);
+        }
+        const noCapability = await submittedAgency('Fiche Sans Capacité');
+        assert.equal((await suspend(noCapability, 'delivery', ownerAccess)).status, 200);
+        await refused(noCapability, 'NO_ACTIVE_CAPABILITY', ['no_active_capability'], 'no active capability');
+
+        // The nominal publication, and what the fiche holds.
+        const before = Date.now();
+        const published = await publish(fiche, ownerAccess);
+        assert.equal(published.status, 200, 'the owner publishes');
+        assert.match(published.headers.get('cache-control'), /no-store/);
+        const publishedBody = await published.json();
+        assert.ok(Date.parse(publishedBody.publishedAt) >= before - 5000);
+        assert.deepEqual({ ...publishedBody, publishedAt: undefined }, { published: true, slug: 'fiche-express-douala', publishedAt: undefined, unpublishedAt: null, visible: true, verification: 'unverified', obstacles: [] });
+        const stored = await profileOf(fiche);
+        assert.deepEqual([stored.slug, stored.published, stored.published_by, stored.unpublished_at], ['fiche-express-douala', true, account.id, null]);
+        assert.deepEqual((await marketTrail(fiche)).map(entry => [entry.action, entry.user_id, entry.resource_id, entry.details]), [['marketplace.profile_published', account.id, fiche, null]], 'one trace, no value');
+        const projected = await listingOf(fiche);
+        assert.deepEqual(Object.keys(projected).sort(), ['agency_id', 'capabilities', 'description', 'name', 'name_key', 'published_at', 'site_cities', 'slug', 'updated_at', 'verification', 'visible', 'zones'], 'the projection holds exactly the closed list of fields');
+        assert.deepEqual([projected.slug, projected.name, projected.name_key, projected.verification, projected.capabilities, projected.site_cities, projected.visible, projected.description], ['fiche-express-douala', 'Fiche Express Douala', 'fiche express douala', 'unverified', ['delivery'], ['Douala'], true, null]);
+        assert.deepEqual(projected.zones, [{ id: akwaRow.id, city: 'Douala', district: 'Akwa', startingPrice: null }, { id: bonaRow.id, city: 'Douala', district: 'Bonabéri', startingPrice: null }], 'active zones, on quote while there is no rate card');
+        const projectedText = JSON.stringify(projected);
+        for (const secret of ['Express Douala SARL', '+237677123456', '677123456', 'Rue Joss', 'RC/DLA/2024/B/1234', 'M012345678901A', 'contact@express.example', account.id, adminUser, invitedUser]) assert.ok(!projectedText.includes(secret), `the projection never holds "${secret}"`);
+        const columns = (await agencyPool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'public_agency_listings'")).rows.map(column => column.column_name);
+        assert.equal(columns.some(column => /legal|phone|email|rccm|niu|address|headquarters|member|user|owner/.test(column)), false, 'no private column in the projection');
+
+        // A second publication is a conflict with no second effect; the rights are checked first.
+        await problemOf(await publish(fiche, ownerAccess), 409, 'PROFILE_ALREADY_PUBLISHED', 'a second publication');
+        await problemOf(await publish(fiche, adminAccess), 403, undefined, 'an administrator is refused before the state is looked at');
+        assert.deepEqual([(await profileOf(fiche)).published_at.toISOString(), (await marketTrail(fiche)).length], [stored.published_at.toISOString(), 1], 'date and trace are those of the first publication');
+
+        // Two publications at once end in one.
+        const doubled = await submittedAgency('Fiche Double');
+        const race = await Promise.all([publish(doubled, ownerAccess), publish(doubled, ownerAccess)]);
+        assert.deepEqual(race.map(response => response.status).sort(), [200, 409], 'one publication wins');
+        assert.deepEqual([(await marketTrail(doubled)).length, (await agencyPool.query('SELECT count(*)::int AS total FROM agency_public_profiles WHERE agency_id = $1', [doubled])).rows[0].total], [1, 1], 'one profile, one trace');
+
+        // Homonymous agencies get distinct addresses, also when published at the same time.
+        const twinOne = await submittedAgency('Fiche Homonyme');
+        const twinTwo = await submittedAgency('Fiche Homonyme');
+        const twins = await Promise.all([publish(twinOne, ownerAccess), publish(twinTwo, ownerAccess)]);
+        assert.deepEqual(twins.map(response => response.status), [200, 200], 'neither twin gets a 500 or a conflict');
+        assert.deepEqual((await Promise.all(twins.map(response => response.json()))).map(body => body.slug).sort(), ['fiche-homonyme', 'fiche-homonyme-2']);
+        const thirdTwin = await submittedAgency('Fiche Homonyme');
+        assert.equal((await (await publish(thirdTwin, ownerAccess)).json()).slug, 'fiche-homonyme-3');
+        assert.equal((await agencyPool.query('SELECT count(DISTINCT slug)::int AS total FROM agency_public_profiles WHERE slug LIKE $1', ['fiche-homonyme%'])).rows[0].total, 3, 'three addresses');
+        await rejectsOnDatabase(agencyPool.query("INSERT INTO agency_public_profiles (agency_id, slug, published, published_at, published_by) VALUES ($1, 'fiche-homonyme', true, now(), $2)", [await configAgency(), account.id]), /agency_public_profiles_slug_unique/, 'the database refuses a slug twice');
+        await rejectsOnDatabase(agencyPool.query("INSERT INTO agency_public_profiles (agency_id, slug, published, published_at, published_by) VALUES ($1, 'Mauvais Slug', true, now(), $2)", [await configAgency(), account.id]), /agency_public_profiles_slug_shape/, 'the database refuses a slug of another shape');
+        await rejectsOnDatabase(agencyPool.query("INSERT INTO agency_public_profiles (agency_id, slug, published, published_at, published_by, unpublished_at) VALUES ($1, 'incoherent-state', true, now(), $2, now())", [await configAgency(), account.id]), /agency_public_profiles_published_matches_withdrawal/, 'the database refuses a published profile that is withdrawn');
+        await rejectsOnDatabase(agencyPool.query("UPDATE public_agency_listings SET verification = 'verified' WHERE agency_id = $1", [fiche]), /public_agency_listings_verification_values/, 'the database refuses any other mention');
+        await rejectsOnDatabase(agencyPool.query("UPDATE public_agency_listings SET capabilities = '{}' WHERE agency_id = $1 AND visible", [fiche]), /public_agency_listings_visible_needs_capability/, 'the database refuses a visible listing with no capability');
+
+        // The projection follows the agency, event by event.
+        const bonaZoneId = bonaRow.id;
+        assert.equal((await retireZone(fiche, bonaZoneId, ownerAccess)).status, 200);
+        assert.deepEqual((await listingOf(fiche)).zones.map(zone => zone.district), ['Akwa'], 'a retired zone disappears');
+        assert.equal((await addZone(fiche, ownerAccess, { city: 'Douala', district: 'Bonabéri' })).status, 201);
+        assert.deepEqual((await listingOf(fiche)).zones.map(zone => zone.district), ['Akwa', 'Bonabéri'], 'a reactivated zone is back');
+        assert.equal((await patchZoneOf(fiche, akwaRow.id, ownerAccess, { city: 'Douala', district: 'Akwa Nord' })).status, 200);
+        const deidoResponse = await addZone(fiche, ownerAccess, { city: 'Douala', district: 'Deïdo' });
+        assert.equal(deidoResponse.status, 201, 'a new zone is added');
+        const deido = await deidoResponse.json();
+        assert.deepEqual((await listingOf(fiche)).zones.map(zone => zone.district), ['Akwa Nord', 'Bonabéri', 'Deïdo'], 'a corrected zone carries its new label, a new zone appears, in alphabetical order');
+        const kribi = await (await createSite(fiche, ownerAccess, { name: 'Agence Kribi', city: 'Kribi', address: 'Rue du Port, Kribi' })).json();
+        assert.deepEqual((await listingOf(fiche)).site_cities, ['Douala', 'Kribi'], 'the city of a new site appears');
+        assert.equal((await patchSite(fiche, kribi.id, ownerAccess, { city: 'Limbe' }, '1')).status, 200);
+        assert.deepEqual((await listingOf(fiche)).site_cities, ['Douala', 'Limbe'], 'the city of a corrected site follows');
+        assert.equal((await siteAction(fiche, kribi.id, 'deactivate', ownerAccess)).status, 200);
+        assert.deepEqual((await listingOf(fiche)).site_cities, ['Douala'], 'the city of a deactivated site disappears');
+        assert.equal((await siteAction(fiche, kribi.id, 'reactivate', ownerAccess)).status, 200);
+        assert.deepEqual((await listingOf(fiche)).site_cities, ['Douala', 'Limbe'], 'and comes back with the site');
+        const markup = '<script>alert(1)</script> Livraison 7j/7';
+        assert.equal((await patchAgency(`${fiche}/profile`, adminAccess, { description: markup }, await versionOf(fiche))).status, 200);
+        assert.equal((await listingOf(fiche)).description, markup, 'the description is kept as text, markup included');
+
+        const createCard = (access, body) => act('POST', `${fiche}/rate-card`, access, body);
+        const cardBody = (akwaPrice) => ({ lines: [
+          { zoneId: akwaRow.id, tiers: [{ upTo: '1 kg', price: akwaPrice }, { upTo: '5 kg', price: akwaPrice + 500 }] },
+          { zoneId: bonaZoneId, tiers: [{ upTo: '1 kg', price: 1500 }, { upTo: '10 kg', price: 2500 }] },
+        ] });
+        assert.equal((await createCard(ownerAccess, cardBody(1000))).status, 201);
+        assert.deepEqual((await listingOf(fiche)).zones.map(zone => [zone.district, zone.startingPrice]), [['Akwa Nord', 1000], ['Bonabéri', 1500], ['Deïdo', null]], 'the lowest price of each priced zone, the others on quote');
+        assert.equal((await act('POST', `${fiche}/rate-card/versions`, adminAccess, cardBody(900), { 'if-match': '"1"' })).status, 201);
+        assert.deepEqual((await listingOf(fiche)).zones.map(zone => zone.startingPrice), [900, 1500, null], 'a new version of the rate card changes the prices');
+        assert.equal((await retireZone(fiche, deido.id, ownerAccess)).status, 200);
+        assert.deepEqual((await listingOf(fiche)).zones.map(zone => zone.district), ['Akwa Nord', 'Bonabéri']);
+
+        // A new name is shown at once, the address never changes.
+        const renamed = await patchAgency(`${fiche}/profile`, adminAccess, { tradeName: 'Fiche Express Douala & Littoral' }, await versionOf(fiche));
+        assert.equal(renamed.status, 200);
+        assert.deepEqual([(await listingOf(fiche)).name, (await listingOf(fiche)).name_key, (await listingOf(fiche)).slug, (await profileOf(fiche)).slug], ['Fiche Express Douala & Littoral', 'fiche express douala & littoral', 'fiche-express-douala', 'fiche-express-douala']);
+
+        // Capabilities: the fiche is hidden, not withdrawn, once none is active, and comes back with the first one.
+        assert.equal((await enable(fiche, 'storage', ownerAccess)).status, 200);
+        assert.deepEqual((await listingOf(fiche)).capabilities, ['delivery', 'storage']);
+        assert.equal((await suspend(fiche, 'delivery', ownerAccess)).status, 200);
+        assert.deepEqual([(await listingOf(fiche)).capabilities, (await listingOf(fiche)).visible], [['storage'], true]);
+        assert.equal((await suspend(fiche, 'storage', ownerAccess)).status, 200);
+        assert.deepEqual([(await listingOf(fiche)).capabilities, (await listingOf(fiche)).visible], [[], false], 'no active capability: hidden');
+        const hidden = await (await readProfile(fiche, agentAccess)).json();
+        assert.deepEqual([hidden.published, hidden.visible, hidden.obstacles, hidden.slug], [true, false, ['no_active_capability'], 'fiche-express-douala'], 'still published, and the team is told what hides it');
+        assert.equal((await enable(fiche, 'delivery', ownerAccess)).status, 200);
+        assert.deepEqual([(await listingOf(fiche)).capabilities, (await listingOf(fiche)).visible], [['delivery'], true], 'visible again');
+        // A name that stopped being publishable (written under the domain, as a database from before B2.13 could hold it) hides the fiche at the next event.
+        await setName(fiche, 'Fiche‮Express');
+        assert.equal((await act('POST', `${fiche}/rate-card/versions`, adminAccess, cardBody(850), { 'if-match': '"2"' })).status, 201);
+        assert.equal((await listingOf(fiche)).visible, false, 'a name that stopped being publishable hides the fiche');
+        await setName(fiche, 'Fiche Express Douala & Littoral');
+        assert.equal((await act('POST', `${fiche}/rate-card/versions`, adminAccess, cardBody(800), { 'if-match': '"3"' })).status, 201);
+        assert.equal((await listingOf(fiche)).visible, true, 'and a corrected name shows it again');
+
+        // A failure of the projection cancels the action that raised the event.
+        await agencyPool.query("CREATE FUNCTION refuse_listing_write() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'listing write refused'; END $$ LANGUAGE plpgsql");
+        await agencyPool.query('CREATE TRIGGER refuse_listing_write BEFORE INSERT OR UPDATE ON public_agency_listings FOR EACH ROW EXECUTE FUNCTION refuse_listing_write()');
+        try {
+          const zonesBefore = (await zoneRows(fiche)).length;
+          const trailBefore = (await configAudit(fiche)).length;
+          assert.equal((await addZone(fiche, ownerAccess, { city: 'Kumba' })).status, 500, 'the action fails with its projection');
+          assert.deepEqual([(await zoneRows(fiche)).length, (await configAudit(fiche)).length], [zonesBefore, trailBefore], 'no zone, no trace: the action was cancelled');
+        } finally {
+          await agencyPool.query('DROP TRIGGER refuse_listing_write ON public_agency_listings');
+          await agencyPool.query('DROP FUNCTION refuse_listing_write()');
+        }
+        assert.equal((await addZone(fiche, ownerAccess, { city: 'Kumba' })).status, 201, 'the action goes through once the projection can be written');
+
+        // Withdrawing, and publishing again: the address is kept and never given to another agency.
+        const stranger = await submittedAgency('Fiche Express Douala');
+        for (const [who, access, status] of [['an administrator', adminAccess, 403], ['an agent', agentAccess, 403], ['an outsider', outsiderAccess, 404], ['a former member', formerAccess, 404]]) {
+          assert.equal((await unpublish(fiche, access)).status, status, `${who} cannot withdraw`);
+        }
+        const withdrawn = await unpublish(fiche, ownerAccess);
+        assert.equal(withdrawn.status, 200);
+        assert.match(withdrawn.headers.get('cache-control'), /no-store/);
+        const withdrawnBody = await withdrawn.json();
+        assert.deepEqual([withdrawnBody.published, withdrawnBody.slug, withdrawnBody.visible, withdrawnBody.unpublishedAt === null], [false, 'fiche-express-douala', false, false]);
+        assert.deepEqual([(await profileOf(fiche)).published, (await listingOf(fiche)).visible], [false, false], 'withdrawn, and not shown');
+        await problemOf(await unpublish(fiche, ownerAccess), 409, 'PROFILE_NOT_PUBLISHED', 'a second withdrawal');
+        assert.equal((await marketTrail(fiche)).filter(entry => entry.action === 'marketplace.profile_unpublished').length, 1, 'one trace per withdrawal');
+        assert.equal((await (await publish(stranger, ownerAccess)).json()).slug, 'fiche-express-douala-2', 'the address of a withdrawn fiche is never given to another agency');
+        const republished = await publish(fiche, ownerAccess);
+        assert.equal(republished.status, 200);
+        const republishedBody = await republished.json();
+        assert.deepEqual([republishedBody.slug, republishedBody.visible, republishedBody.unpublishedAt], ['fiche-express-douala', true, null], 'the same address, shown again');
+        assert.deepEqual([(await listingOf(fiche)).visible, (await listingOf(fiche)).slug, (await profileOf(fiche)).published], [true, 'fiche-express-douala', true]);
+        assert.deepEqual((await marketTrail(fiche)).map(entry => entry.action), ['marketplace.profile_published', 'marketplace.profile_unpublished', 'marketplace.profile_published']);
+        assert.ok((await marketTrail(fiche)).every(entry => entry.resource_id === fiche && entry.details === null), 'every trace names the agency and holds no value');
+
+        // The rights are checked before the lock: a refused person is answered while the agency row is held; the owner waits.
+        const holder = await agencyPool.connect();
+        try {
+          await holder.query('BEGIN');
+          await holder.query('SELECT id FROM agencies WHERE id = $1 FOR UPDATE', [fiche]);
+          const quickly = (response) => Promise.race([response, delay(4000).then(() => { throw new Error('answered only after the lock was released: the lock is taken before the membership check'); })]);
+          assert.equal((await quickly(publish(fiche, outsiderAccess))).status, 404, 'an outsider is answered without waiting');
+          assert.equal((await quickly(unpublish(fiche, formerAccess))).status, 404, 'a former member is answered without waiting');
+          assert.equal((await quickly(publish(fiche, adminAccess))).status, 403, 'an administrator is answered without waiting');
+          assert.equal((await quickly(unpublish(fiche, agentAccess))).status, 403, 'an agent is answered without waiting');
+          const waiting = unpublish(fiche, ownerAccess);
+          assert.equal(await Promise.race([waiting.then(() => 'answered'), delay(500).then(() => 'waiting')]), 'waiting', 'the owner waits for the lock');
+          await holder.query('COMMIT');
+          assert.equal((await waiting).status, 200, 'and goes through once it is released');
+        } finally {
+          await holder.query('ROLLBACK').catch(() => undefined);
+          holder.release();
+        }
+        assert.equal((await publish(fiche, ownerAccess)).status, 200);
+
+        // Neighbours: nothing leaked from or to another agency, and no public route yet.
+        assert.equal(await listingOf(draft), undefined, 'a draft has no listing');
+        assert.equal(await listingOf(noCapability), undefined, 'an agency that never published has no listing, whatever happened to it');
+        assert.equal((await fetch(`${api}/public/agencies`)).status, 404, 'the public routes are for the next slice');
+        await agencyPool.query("UPDATE agencies SET trade_name = 'Configuration Express' WHERE id = ANY($1)", [[...mine, fiche]]);
+        activeOne = previousActive;
+      }
+
       // Audit: one row per effective action, names and types only.
       const trail = await configAudit(capsAgency);
       assert.deepEqual(trail.filter(entry => entry.action === 'agency.capability_enabled' || entry.action === 'agency.capability_suspended').slice(0, 3).map(entry => [entry.action, entry.user_id, entry.details]), [
@@ -1900,7 +2151,7 @@ const { Client } = require('pg');
     assert.ok(spec.paths['/api/v1/auth/logout']);
     assert.ok(spec.paths['/api/v1/me']);
     assert.deepEqual(Object.keys(spec.paths).sort(), [
-      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/quotes', '/api/v1/agencies/{agencyId}/quotes/preview', '/api/v1/agencies/{agencyId}/quotes/{quoteId}', '/api/v1/agencies/{agencyId}/quotes/{quoteId}/accept', '/api/v1/agencies/{agencyId}/rate-card', '/api/v1/agencies/{agencyId}/rate-card/versions', '/api/v1/agencies/{agencyId}/rate-card/versions/{number}', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/submit', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
+      '/api/v1/agencies', '/api/v1/agencies/{agencyId}', '/api/v1/agencies/{agencyId}/capabilities/{type}/activate', '/api/v1/agencies/{agencyId}/capabilities/{type}/suspend', '/api/v1/agencies/{agencyId}/identity', '/api/v1/agencies/{agencyId}/invitations', '/api/v1/agencies/{agencyId}/members', '/api/v1/agencies/{agencyId}/members/{memberId}', '/api/v1/agencies/{agencyId}/onboarding', '/api/v1/agencies/{agencyId}/profile', '/api/v1/agencies/{agencyId}/public-profile', '/api/v1/agencies/{agencyId}/public-profile/publish', '/api/v1/agencies/{agencyId}/public-profile/unpublish', '/api/v1/agencies/{agencyId}/quotes', '/api/v1/agencies/{agencyId}/quotes/preview', '/api/v1/agencies/{agencyId}/quotes/{quoteId}', '/api/v1/agencies/{agencyId}/quotes/{quoteId}/accept', '/api/v1/agencies/{agencyId}/rate-card', '/api/v1/agencies/{agencyId}/rate-card/versions', '/api/v1/agencies/{agencyId}/rate-card/versions/{number}', '/api/v1/agencies/{agencyId}/sites', '/api/v1/agencies/{agencyId}/sites/{siteId}', '/api/v1/agencies/{agencyId}/sites/{siteId}/deactivate', '/api/v1/agencies/{agencyId}/sites/{siteId}/reactivate', '/api/v1/agencies/{agencyId}/submit', '/api/v1/agencies/{agencyId}/zones', '/api/v1/agencies/{agencyId}/zones/{zoneId}',
       '/api/v1/agency-invitations/accept',
       '/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/auth/refresh', '/api/v1/auth/register',
       '/api/v1/health/live', '/api/v1/health/ready', '/api/v1/me', '/api/v1/me/agencies',

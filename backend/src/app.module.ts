@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { validateEnv } from '@config/env.schema';
 import { AgenciesModule } from '@modules/agencies/agencies.module';
 import { IdentityModule } from '@modules/identity/identity.module';
+import { MarketplaceModule } from '@modules/marketplace/marketplace.module';
 import { PricingModule } from '@modules/pricing/pricing.module';
 import { SharedInfrastructureModule } from '@shared/infrastructure/shared-infrastructure.module';
 
@@ -16,6 +17,7 @@ import { SharedInfrastructureModule } from '@shared/infrastructure/shared-infras
     IdentityModule,
     AgenciesModule,
     PricingModule,
+    MarketplaceModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
